@@ -8,12 +8,9 @@ use crate::{SettingsTab, View};
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ChannelInputSource {
     Track,
-    AudiocardInput,
-    Input1_2,
-    Input3_4,
-    Input5_6,
-    Input7_8,
-    Instrument,
+    Sampler,
+    Synth,
+    AnalogInput,
     DrumMachine,
 }
 
@@ -21,25 +18,19 @@ impl ChannelInputSource {
     pub fn name(&self) -> &'static str {
         match self {
             Self::Track => "Track",
-            Self::AudiocardInput => "Soundcard In (Default)",
-            Self::Input1_2 => "Soundcard In 1-2",
-            Self::Input3_4 => "Soundcard In 3-4",
-            Self::Input5_6 => "Soundcard In 5-6",
-            Self::Input7_8 => "Soundcard In 7-8",
-            Self::Instrument => "Instrument",
-            Self::DrumMachine => "Drum Machine Subchannel",
+            Self::Sampler => "Sampler",
+            Self::Synth => "Analog Synth",
+            Self::AnalogInput => "Analog / Soundcard In",
+            Self::DrumMachine => "Drum Machine",
         }
     }
 
     pub fn all() -> &'static [Self] {
         &[
             Self::Track,
-            Self::AudiocardInput,
-            Self::Input1_2,
-            Self::Input3_4,
-            Self::Input5_6,
-            Self::Input7_8,
-            Self::Instrument,
+            Self::Sampler,
+            Self::Synth,
+            Self::AnalogInput,
             Self::DrumMachine,
         ]
     }
@@ -605,6 +596,8 @@ pub struct ComposerState {
     pub studio_sequencer_grid: [Vec<f32>; 16],
     /// Independent 16-subchannel step grid per parent track [parent_track_idx][subchannel_idx].
     pub subchannel_sequencer_grid: [[Vec<f32>; 16]; 16],
+    /// Visible subchannel count per parent track (defaults to 1).
+    pub visible_subchannel_count: [usize; 16],
     pub selected_composer_track: Option<usize>,
     pub selected_clip: Option<(usize, usize)>,
     pub clip_editor_drawer_open: bool,
@@ -639,6 +632,7 @@ impl Default for ComposerState {
             sequencer_grid: std::array::from_fn(|_| std::array::from_fn(|_| vec![0.0; 64])),
             studio_sequencer_grid: std::array::from_fn(|_| vec![0.0; 64]),
             subchannel_sequencer_grid: std::array::from_fn(|_| std::array::from_fn(|_| vec![0.0; 64])),
+            visible_subchannel_count: [1; 16],
             selected_composer_track: None,
             selected_clip: None,
             clip_editor_drawer_open: true,

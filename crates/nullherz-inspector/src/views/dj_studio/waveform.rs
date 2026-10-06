@@ -151,10 +151,6 @@ pub fn render_deck_waveform_zone(app: &mut InspectorApp, ui: &mut Ui, i: usize, 
             }
         }
     }
-    if response.clicked() {
-        app.decks.focused_deck = i;
-    }
-
     // The track's OWN rate, not the device's. Every quantity below —
     // `total_frames`, `deck_positions`, the beat grid, hot cues — is measured in
     // SOURCE frames, so converting them to seconds or to a needle window must
@@ -184,6 +180,29 @@ pub fn render_deck_waveform_zone(app: &mut InspectorApp, ui: &mut Ui, i: usize, 
     let win_end = center as f64 + (window_frames as f64) * 0.5;
     let start_ratio = (win_start / total_frames as f64) as f32;
     let end_ratio = (win_end / total_frames as f64) as f32;
+
+    if response.clicked() {
+        app.decks.focused_deck = i;
+        if let Some(mouse_pos) = response.interact_pointer_pos() {
+            let cx = rect.center().x;
+            let dx_px = mouse_pos.x - cx;
+            let frames_per_px = window_frames as f64 / rect.width().max(1.0) as f64;
+            let target_frame = (elapsed_samples as f64 + (dx_px as f64 * frames_per_px)).clamp(0.0, total_frames as f64) as u64;
+            let diff_frames = target_frame as i64 - elapsed_samples as i64;
+            let node_name = match i {
+                0 => "deck_a_sampler",
+                1 => "deck_b_sampler",
+                2 => "deck_c_sampler",
+                3 => "deck_d_sampler",
+                _ => "",
+            };
+            if let Some(node_idx) = app.get_node_id(node_name) {
+                let _ = app.command_sender.send(nullherz_traits::Command::Performance(
+                    nullherz_traits::PerformanceCommand::NudgePosition { node_idx, frames: diff_frames },
+                ));
+            }
+        }
+    }
 
     use crate::state::DeckWaveformMode;
     let wf_mode = app.mixer.deck_waveform_mode[i];
