@@ -4,6 +4,44 @@ use crate::state::{ChannelInputSource, MasterOutput};
 use nullherz_ui_hal::widgets;
 use audio_core::Telemetry;
 
+pub fn effective_channel_gain(app: &InspectorApp, ch_idx: usize) -> f32 {
+    let any_solo = app.mixer.channel_solos.iter().any(|&s| s);
+    let is_muted = app.mixer.channel_mutes[ch_idx];
+    let is_solo = app.mixer.channel_solos[ch_idx];
+
+    let active = if any_solo {
+        is_solo && !is_muted
+    } else {
+        !is_muted
+    };
+
+    if active {
+        app.mixer.channel_gain[ch_idx] * app.mixer.channel_faders[ch_idx]
+    } else {
+        0.0
+    }
+}
+
+pub fn update_channel_net_gain(app: &InspectorApp, ch_idx: usize) {
+    let deck_char_letter = (b'a' + (ch_idx % 26) as u8) as char;
+    if let Some(gain_id) = app.topo.node_map.get(&format!("deck_{}_gain", deck_char_letter)).copied() {
+        let net_gain = effective_channel_gain(app, ch_idx);
+        let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+            target_id: gain_id as u64,
+            param_id: 0,
+            value: net_gain,
+            ramp_duration_samples: 128,
+        }));
+    }
+}
+
+pub fn update_all_channel_gains(app: &InspectorApp) {
+    let num_ch = app.mixer.num_channels.clamp(1, 16);
+    for i in 0..num_ch {
+        update_channel_net_gain(app, i);
+    }
+}
+
 /// Fixed strip width: every card is the same size regardless of window width.
 pub const STRIP_W: f32 = 78.0;
 #[allow(dead_code)]
@@ -175,19 +213,10 @@ fn render_channel_fx_rack_item(app: &mut InspectorApp, ui: &mut Ui, ch_idx: usiz
 
                     let name_upper = insert_name.to_uppercase();
                     if name_upper.contains("TRIM") || name_upper.contains("GAIN") {
-                        let gain_node = app.topo.node_map.get(&format!("deck_{}_gain", (b'a' + active_deck as u8) as char)).copied();
                         let mut gain_val = app.mixer.channel_gain[ch_idx];
                         if widgets::render_knob_sized(ui, &mut gain_val, 0.0..=2.0, "GAIN", accent_color, 18.0).changed() {
                             app.mixer.channel_gain[ch_idx] = gain_val;
-                            if let Some(gain_id) = gain_node {
-                                let net_gain = gain_val * app.mixer.channel_faders[ch_idx];
-                                let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
-                                    target_id: gain_id as u64,
-                                    param_id: 0,
-                                    value: net_gain,
-                                    ramp_duration_samples: 128,
-                                }));
-                            }
+                            update_channel_net_gain(app, ch_idx);
                         }
                     } else if name_upper.contains("PITCH") || name_upper.contains("SPEED") {
                         let mut pitch_val = app.mixer.channel_pitch[ch_idx];
@@ -620,7 +649,6 @@ pub fn render_channel_strip_full(app: &mut InspectorApp, ui: &mut Ui, i: usize, 
         let deck_color = crate::InspectorApp::deck_color(&theme, i % 4);
         let deck_char_letter = (b'a' + (i % 26) as u8) as char;
 
-        let gain_node = app.topo.node_map.get(&format!("deck_{}_gain", deck_char_letter)).copied();
         let iso_node = app.topo.node_map.get(&format!("deck_{}_isolator", deck_char_letter)).copied();
         let meter_node = iso_node.or_else(|| app.topo.node_map.get(&format!("deck_{}_sampler", deck_char_letter)).copied());
 
@@ -738,28 +766,16 @@ pub fn render_channel_strip_full(app: &mut InspectorApp, ui: &mut Ui, i: usize, 
 
                         ui.add_space( theme.space_sm);
 
-                        // --- VOLUME FADER & STEREO VU METERS ---
+                        // --- VOLUME FADER, STEREO VU METERS & MUTE/SOLO ---
                         ui.horizontal(|ui| {
-                            let fader_w = 20.0;
-                            let pad = (ui.available_width() - fader_w - 12.0).max(0.0) / 2.0;
-                            ui.add_space(pad);
-
                             let r_fader = widgets::render_fader(ui, &mut app.mixer.channel_faders[i], 0.0..=1.2, deck_color, FADER_H, 22.0);
                             if r_fader.changed() {
-                                if let Some(gain_id) = gain_node {
-                                    let net_gain = app.mixer.channel_gain[i] * app.mixer.channel_faders[i];
-                                    let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
-                                        target_id: gain_id as u64,
-                                        param_id: 0,
-                                        value: net_gain,
-                                        ramp_duration_samples: 128,
-                                    }));
-                                }
+                                update_channel_net_gain(app, i);
                             }
 
                             ui.add_space(2.0);
 
-                            // STEREO VU METERS - Thinner and closer together
+                            // STEREO VU METERS
                             ui.horizontal(|ui| {
                                 ui.spacing_mut().item_spacing.x = 1.0;
                                 if let (Some(t), Some(node)) = (telemetry, meter_node) {
@@ -773,6 +789,27 @@ pub fn render_channel_strip_full(app: &mut InspectorApp, ui: &mut Ui, i: usize, 
                                 } else {
                                     widgets::render_vu_meter_sized(ui, 0.0, 0.0, theme.text_disabled, 4.0, FADER_H);
                                     widgets::render_vu_meter_sized(ui, 0.0, 0.0, theme.text_disabled, 4.0, FADER_H);
+                                }
+                            });
+
+                            ui.add_space(2.0);
+
+                            // MUTE & SOLO
+                            ui.vertical(|ui| {
+                                let is_muted = app.mixer.channel_mutes[i];
+                                let mute_color = if is_muted { theme.danger } else { theme.bg_inset };
+                                if ui.add_sized([18.0, 18.0], egui::Button::new(RichText::new("M").size(7.5).strong()).fill(mute_color)).on_hover_text("Mute Channel").clicked() {
+                                    app.mixer.channel_mutes[i] = !is_muted;
+                                    update_all_channel_gains(app);
+                                }
+
+                                ui.add_space(2.0);
+
+                                let is_solo = app.mixer.channel_solos[i];
+                                let solo_color = if is_solo { theme.warning } else { theme.bg_inset };
+                                if ui.add_sized([18.0, 18.0], egui::Button::new(RichText::new("S").size(7.5).strong()).fill(solo_color)).on_hover_text("Solo Channel").clicked() {
+                                    app.mixer.channel_solos[i] = !is_solo;
+                                    update_all_channel_gains(app);
                                 }
                             });
                         });
@@ -1126,16 +1163,18 @@ fn render_horizontal_channel_card(app: &mut InspectorApp, ui: &mut Ui, i: usize,
                     ui.add_space(theme.space_xs);
 
                     // Mute / Solo
-                    let mute = app.mixer.stem_mutes[0][i % 12];
+                    let mute = app.mixer.channel_mutes[i];
                     let mute_bg = if mute { theme.danger } else { theme.bg_inset };
-                    if ui.add_sized([18.0, 18.0], egui::Button::new(RichText::new("M").size(8.0).strong()).fill(mute_bg)).clicked() {
-                        app.mixer.stem_mutes[0][i % 12] = !mute;
+                    if ui.add_sized([18.0, 18.0], egui::Button::new(RichText::new("M").size(8.0).strong()).fill(mute_bg)).on_hover_text("Mute Channel").clicked() {
+                        app.mixer.channel_mutes[i] = !mute;
+                        update_all_channel_gains(app);
                     }
 
-                    let solo = app.mixer.stem_solos[0][i % 12];
+                    let solo = app.mixer.channel_solos[i];
                     let solo_bg = if solo { theme.warning } else { theme.bg_inset };
-                    if ui.add_sized([18.0, 18.0], egui::Button::new(RichText::new("S").size(8.0).strong()).fill(solo_bg)).clicked() {
-                        app.mixer.stem_solos[0][i % 12] = !solo;
+                    if ui.add_sized([18.0, 18.0], egui::Button::new(RichText::new("S").size(8.0).strong()).fill(solo_bg)).on_hover_text("Solo Channel").clicked() {
+                        app.mixer.channel_solos[i] = !solo;
+                        update_all_channel_gains(app);
                     }
 
                     ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -1147,6 +1186,7 @@ fn render_horizontal_channel_card(app: &mut InspectorApp, ui: &mut Ui, i: usize,
                         let mut fader = app.mixer.channel_faders[i];
                         if ui.add(egui::Slider::new(&mut fader, 0.0..=1.2).show_value(false)).changed() {
                             app.mixer.channel_faders[i] = fader;
+                            update_channel_net_gain(app, i);
                         }
                     });
                 });
@@ -1156,7 +1196,9 @@ fn render_horizontal_channel_card(app: &mut InspectorApp, ui: &mut Ui, i: usize,
                 // Quick Rotary Knobs Row: Trim, Hi, Mid, Low
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 4.0;
-                    widgets::render_knob_sized(ui, &mut app.mixer.channel_gain[i], 0.0..=2.0, "TRIM", deck_color, 20.0);
+                    if widgets::render_knob_sized(ui, &mut app.mixer.channel_gain[i], 0.0..=2.0, "TRIM", deck_color, 20.0).changed() {
+                        update_channel_net_gain(app, i);
+                    }
                     widgets::render_knob_sized(ui, &mut app.mixer.channel_eq_high[i], 0.0..=2.0, "HI", deck_color, 20.0);
                     widgets::render_knob_sized(ui, &mut app.mixer.channel_eq_mid[i], 0.0..=2.0, "MID", deck_color, 20.0);
                     widgets::render_knob_sized(ui, &mut app.mixer.channel_eq_low[i], 0.0..=2.0, "LOW", deck_color, 20.0);

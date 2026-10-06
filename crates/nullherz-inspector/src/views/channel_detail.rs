@@ -133,18 +133,28 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
                     // Mute / Solo Toggles
                     ui.horizontal(|ui| {
-                        let mut mute = if is_drum { app.sampler.subchannel_mutes[deck_i] } else { app.mixer.stem_mutes[0][deck_i % 12] };
+                        let mut mute = if is_drum { app.sampler.subchannel_mutes[deck_i] } else { app.mixer.channel_mutes[deck_i % 16] };
                         let mute_bg = if mute { app.theme.danger } else { app.theme.bg_inset };
                         if ui.add_sized([90.0, 24.0], egui::Button::new(RichText::new("MUTE").strong()).fill(mute_bg)).clicked() {
                             mute = !mute;
-                            if is_drum { app.sampler.subchannel_mutes[deck_i] = mute; } else { app.mixer.stem_mutes[0][deck_i % 12] = mute; }
+                            if is_drum {
+                                app.sampler.subchannel_mutes[deck_i] = mute;
+                            } else {
+                                app.mixer.channel_mutes[deck_i % 16] = mute;
+                                super::mixer::update_all_channel_gains(app);
+                            }
                         }
 
-                        let mut solo = if is_drum { app.sampler.subchannel_solos[deck_i] } else { app.mixer.stem_solos[0][deck_i % 12] };
+                        let mut solo = if is_drum { app.sampler.subchannel_solos[deck_i] } else { app.mixer.channel_solos[deck_i % 16] };
                         let solo_bg = if solo { app.theme.warning } else { app.theme.bg_inset };
                         if ui.add_sized([90.0, 24.0], egui::Button::new(RichText::new("SOLO").strong()).fill(solo_bg)).clicked() {
                             solo = !solo;
-                            if is_drum { app.sampler.subchannel_solos[deck_i] = solo; } else { app.mixer.stem_solos[0][deck_i % 12] = solo; }
+                            if is_drum {
+                                app.sampler.subchannel_solos[deck_i] = solo;
+                            } else {
+                                app.mixer.channel_solos[deck_i % 16] = solo;
+                                super::mixer::update_all_channel_gains(app);
+                            }
                         }
                     });
 

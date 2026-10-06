@@ -370,20 +370,51 @@ fn render_condensed_deck_header(app: &mut InspectorApp, ui: &mut Ui, i: usize, d
 
         ui.add_space(theme.space_xs);
 
-        // Master Deck Toggle ("M")
+        // Play / Stop Toggle
+        let is_deck_playing = app.decks.deck_playing[i];
+        let play_icon = if is_deck_playing { egui_phosphor::regular::PAUSE } else { egui_phosphor::regular::PLAY };
+        let play_btn = if is_deck_playing {
+            egui::Button::new(RichText::new(play_icon).size(10.0).strong()).fill(theme.accent)
+        } else {
+            egui::Button::new(RichText::new(play_icon).size(10.0).strong()).fill(theme.bg_inset)
+        };
+        if ui.add_sized([22.0, 18.0], play_btn).on_hover_text("Play / Pause Deck").clicked() {
+            app.decks.focused_deck = i;
+            let new_playing = !is_deck_playing;
+            app.decks.deck_playing[i] = new_playing;
+            app.viz.deck_still_snapshots[i] = 0;
+            if new_playing {
+                let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::PlayDeck { deck_id: deck_id_label }));
+            } else {
+                let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::StopDeck { deck_id: deck_id_label }));
+            }
+        }
+
+        // CUE Button
+        if ui.add_sized([26.0, 18.0], egui::Button::new(RichText::new("CUE").size(8.5).strong()).fill(theme.bg_inset)).on_hover_text("Jump to Hot Cue 1").clicked() {
+            app.decks.focused_deck = i;
+            let node_name = format!("deck_{}_sampler", (b'a' + i as u8) as char);
+            if let Some(node_idx) = app.get_node_id(&node_name) {
+                let _ = app.command_sender.send(nullherz_traits::Command::Performance(nullherz_traits::PerformanceCommand::JumpToHotCue { node_idx, cue_idx: 0 }));
+            }
+        }
+
+        ui.add_space(theme.space_xs);
+
+        // Master Deck Toggle ("MST")
         let is_master = app.decks.master_deck == Some(i);
         let m_color = if is_master { deck_color } else { theme.text_disabled };
-        if ui.selectable_label(is_master, RichText::new("M").strong().size(theme.type_caption).color(m_color)).clicked() {
+        if ui.selectable_label(is_master, RichText::new("MST").strong().size(8.5).color(m_color)).on_hover_text("Set Master Deck").clicked() {
              app.decks.master_deck = Some(i);
              let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::SetMasterDeck(deck_id_label)));
         }
 
         ui.add_space(theme.space_xs);
 
-        // Sync toggle
+        // Sync toggle ("SYNC")
         let is_sync = app.mixer.channel_sync[i];
         let sync_color = if is_sync { theme.accent } else { theme.text_disabled };
-        if ui.selectable_label(is_sync, RichText::new("S").strong().size(theme.type_caption).color(sync_color)).clicked() {
+        if ui.selectable_label(is_sync, RichText::new("SYNC").strong().size(8.5).color(sync_color)).on_hover_text("Toggle Tempo Sync").clicked() {
             app.mixer.channel_sync[i] = !is_sync;
             if let Some(node) = app.get_node_id(&format!("deck_{}_sampler", (b'a' + i as u8) as char)) {
                 let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {

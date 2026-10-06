@@ -195,6 +195,8 @@ pub struct MixerState {
     pub mixer_drawer_open: bool,
     pub folded_pads: [bool; 16],
     pub crossfader_assign: [u8; 16],
+    pub channel_mutes: [bool; 16],
+    pub channel_solos: [bool; 16],
     pub channel_faders: [f32; 16],
     /// Input trim gain per channel (1.0 = 0 dB trim). Separate from channel volume fader.
     pub channel_gain: [f32; 16],
@@ -290,6 +292,8 @@ impl Default for MixerState {
             mixer_drawer_open: true,
             folded_pads: [false; 16],
             crossfader_assign: [1; 16], // Default 1 = THRU
+            channel_mutes: [false; 16],
+            channel_solos: [false; 16],
             focused_detail_channel: 0,
             channel_faders: [1.0; 16],
             channel_gain: [1.0; 16],
