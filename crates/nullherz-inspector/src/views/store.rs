@@ -1,4 +1,4 @@
-use egui::{RichText, Ui, ScrollArea, Layout, Align, Frame, Margin, Rounding};
+use egui::{RichText, Ui, ScrollArea, Layout, Align, Frame, Margin, Rounding, Stroke};
 use crate::InspectorApp;
 use crate::state::{MainCategory, AudioSubcategory, SidecarSubcategory};
 use sidecar_sdk::{AssetCategory, SidecarType, SidecarDescriptor};
@@ -41,7 +41,7 @@ pub fn render_with_mode(app: &mut InspectorApp, ui: &mut Ui, is_sidebar: bool) {
 fn render_categories_header(app: &mut InspectorApp, ui: &mut Ui) {
     let theme = app.theme;
 
-    // Main Category Selector
+    // Main Category Selector Grid
     ui.label(
         RichText::new("MAIN CATEGORY")
             .size(theme.type_caption)
@@ -50,29 +50,47 @@ fn render_categories_header(app: &mut InspectorApp, ui: &mut Ui) {
     );
     ui.add_space(theme.space_xs);
 
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing = egui::vec2(theme.space_sm, theme.space_xs);
+    egui::Grid::new("store_main_cat_grid")
+        .num_columns(2)
+        .spacing([theme.space_xs, theme.space_xs])
+        .show(ui, |ui| {
+            for main_cat in MainCategory::all() {
+                let is_selected = app.store.active_main_category == *main_cat;
+                let (icon, label_text) = match main_cat {
+                    MainCategory::Audio => (egui_phosphor::regular::MUSIC_NOTES, "AUDIO"),
+                    MainCategory::Sidecars => (egui_phosphor::regular::PACKAGE, "SIDECARS"),
+                };
 
-        for main_cat in MainCategory::all() {
-            let is_selected = app.store.active_main_category == *main_cat;
-            let (icon, label_text) = match main_cat {
-                MainCategory::Audio => (egui_phosphor::regular::MUSIC_NOTES, "AUDIO"),
-                MainCategory::Sidecars => (egui_phosphor::regular::PACKAGE, "SIDECARS"),
-            };
+                let bg = if is_selected { theme.accent.linear_multiply(0.18) } else { theme.bg_inset };
+                let border = if is_selected { theme.accent } else { theme.border_stroke.color };
 
-            let text = RichText::new(format!("{} {}", icon, label_text))
-                .size(theme.type_caption + 1.0)
-                .strong();
+                let card = Frame::none()
+                    .fill(bg)
+                    .rounding(Rounding::same(theme.radius_sm))
+                    .stroke(Stroke::new(1.0_f32, border))
+                    .inner_margin(Margin::symmetric(theme.space_sm, theme.space_xs));
 
-            if ui.selectable_label(is_selected, text).clicked() {
-                app.store.active_main_category = *main_cat;
+                let resp = card.show(ui, |ui| {
+                    ui.set_width((ui.available_width() - theme.space_xs) * 0.5);
+                    ui.centered_and_justified(|ui| {
+                        ui.label(
+                            RichText::new(format!("{} {}", icon, label_text))
+                                .size(theme.type_caption)
+                                .strong()
+                                .color(if is_selected { theme.accent } else { theme.text_primary }),
+                        );
+                    });
+                }).response;
+
+                if resp.interact(egui::Sense::click()).clicked() {
+                    app.store.active_main_category = *main_cat;
+                }
             }
-        }
-    });
+        });
 
     ui.add_space(theme.space_sm);
 
-    // Subcategories Selector
+    // Subcategories Grid
     ui.label(
         RichText::new("SUBCATEGORIES")
             .size(theme.type_caption)
@@ -81,43 +99,93 @@ fn render_categories_header(app: &mut InspectorApp, ui: &mut Ui) {
     );
     ui.add_space(theme.space_xs);
 
-    ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing = egui::vec2(theme.space_xs, theme.space_xs);
+    let sub_cols = 2;
+    egui::Grid::new("store_sub_cat_grid")
+        .num_columns(sub_cols)
+        .spacing([theme.space_xs, theme.space_xs])
+        .show(ui, |ui| {
+            match app.store.active_main_category {
+                MainCategory::Audio => {
+                    for (idx, sub) in AudioSubcategory::all().iter().enumerate() {
+                        let is_selected = app.store.active_audio_sub == *sub;
+                        let icon = match sub {
+                            AudioSubcategory::All => egui_phosphor::regular::STACK,
+                            AudioSubcategory::Tracks => egui_phosphor::regular::DISC,
+                            AudioSubcategory::Samples => egui_phosphor::regular::WAVEFORM,
+                            AudioSubcategory::Stems => egui_phosphor::regular::LIGHTNING,
+                        };
 
-        match app.store.active_main_category {
-            MainCategory::Audio => {
-                for sub in AudioSubcategory::all() {
-                    let is_selected = app.store.active_audio_sub == *sub;
-                    let icon = match sub {
-                        AudioSubcategory::All => egui_phosphor::regular::STACK,
-                        AudioSubcategory::Tracks => egui_phosphor::regular::DISC,
-                        AudioSubcategory::Samples => egui_phosphor::regular::WAVEFORM,
-                        AudioSubcategory::Stems => egui_phosphor::regular::LIGHTNING,
-                    };
+                        let label = format!("{} {}", icon, sub.name().to_uppercase());
+                        let bg = if is_selected { theme.accent.linear_multiply(0.18) } else { theme.bg_inset };
+                        let border = if is_selected { theme.accent } else { theme.border_stroke.color };
 
-                    if ui.selectable_label(is_selected, format!("{} {}", icon, sub.name().to_uppercase())).clicked() {
-                        app.store.active_audio_sub = *sub;
+                        let card = Frame::none()
+                            .fill(bg)
+                            .rounding(Rounding::same(theme.radius_sm))
+                            .stroke(Stroke::new(1.0_f32, border))
+                            .inner_margin(Margin::symmetric(theme.space_xs, 4.0));
+
+                        let resp = card.show(ui, |ui| {
+                            ui.set_width((ui.available_width() - theme.space_xs) * 0.5);
+                            ui.add(egui::Label::new(
+                                RichText::new(&label)
+                                    .size(theme.type_caption - 1.0)
+                                    .strong()
+                                    .color(if is_selected { theme.accent } else { theme.text_primary }),
+                            ).truncate());
+                        }).response;
+
+                        if resp.interact(egui::Sense::click()).clicked() {
+                            app.store.active_audio_sub = *sub;
+                        }
+
+                        if (idx + 1) % sub_cols == 0 {
+                            ui.end_row();
+                        }
+                    }
+                }
+                MainCategory::Sidecars => {
+                    for (idx, sub) in SidecarSubcategory::all().iter().enumerate() {
+                        let is_selected = app.store.active_sidecar_sub == *sub;
+                        let icon = match sub {
+                            SidecarSubcategory::All => egui_phosphor::regular::PACKAGE,
+                            SidecarSubcategory::AudioInstruments => egui_phosphor::regular::PIANO_KEYS,
+                            SidecarSubcategory::AudioInserts => egui_phosphor::regular::SLIDERS_HORIZONTAL,
+                            SidecarSubcategory::VisualInstruments => egui_phosphor::regular::APERTURE,
+                            SidecarSubcategory::VisualInserts => egui_phosphor::regular::EYE,
+                        };
+
+                        let label = format!("{} {}", icon, sub.name().to_uppercase());
+                        let bg = if is_selected { theme.accent.linear_multiply(0.18) } else { theme.bg_inset };
+                        let border = if is_selected { theme.accent } else { theme.border_stroke.color };
+
+                        let card = Frame::none()
+                            .fill(bg)
+                            .rounding(Rounding::same(theme.radius_sm))
+                            .stroke(Stroke::new(1.0_f32, border))
+                            .inner_margin(Margin::symmetric(theme.space_xs, 4.0));
+
+                        let resp = card.show(ui, |ui| {
+                            ui.set_width((ui.available_width() - theme.space_xs) * 0.5);
+                            ui.add(egui::Label::new(
+                                RichText::new(&label)
+                                    .size(theme.type_caption - 1.0)
+                                    .strong()
+                                    .color(if is_selected { theme.accent } else { theme.text_primary }),
+                            ).truncate());
+                        }).response;
+
+                        if resp.interact(egui::Sense::click()).clicked() {
+                            app.store.active_sidecar_sub = *sub;
+                        }
+
+                        if (idx + 1) % sub_cols == 0 {
+                            ui.end_row();
+                        }
                     }
                 }
             }
-            MainCategory::Sidecars => {
-                for sub in SidecarSubcategory::all() {
-                    let is_selected = app.store.active_sidecar_sub == *sub;
-                    let icon = match sub {
-                        SidecarSubcategory::All => egui_phosphor::regular::PACKAGE,
-                        SidecarSubcategory::AudioInstruments => egui_phosphor::regular::PIANO_KEYS,
-                        SidecarSubcategory::AudioInserts => egui_phosphor::regular::SLIDERS_HORIZONTAL,
-                        SidecarSubcategory::VisualInstruments => egui_phosphor::regular::APERTURE,
-                        SidecarSubcategory::VisualInserts => egui_phosphor::regular::EYE,
-                    };
-
-                    if ui.selectable_label(is_selected, format!("{} {}", icon, sub.name().to_uppercase())).clicked() {
-                        app.store.active_sidecar_sub = *sub;
-                    }
-                }
-            }
-        }
-    });
+        });
 }
 
 fn render_search_bar(app: &mut InspectorApp, ui: &mut Ui) {
