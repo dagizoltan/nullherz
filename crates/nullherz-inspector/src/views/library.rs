@@ -123,7 +123,7 @@ pub fn render_with_mode(app: &mut InspectorApp, ui: &mut Ui, is_sidebar: bool) {
 fn render_categories_header(app: &mut InspectorApp, ui: &mut Ui) {
     let theme = app.theme;
 
-    // Main Category Selector Buttons
+    // Main Category Selector Grid
     ui.label(
         RichText::new("MAIN CATEGORY")
             .size(theme.type_caption)
@@ -132,30 +132,48 @@ fn render_categories_header(app: &mut InspectorApp, ui: &mut Ui) {
     );
     ui.add_space(theme.space_xs);
 
-    ui.horizontal(|ui| {
-        ui.spacing_mut().item_spacing = egui::vec2(theme.space_sm, theme.space_xs);
+    egui::Grid::new("lib_main_cat_grid")
+        .num_columns(2)
+        .spacing([theme.space_xs, theme.space_xs])
+        .show(ui, |ui| {
+            for main_cat in MainCategory::all() {
+                let is_selected = app.library.active_main_category == *main_cat;
+                let (icon, label_text) = match main_cat {
+                    MainCategory::Audio => (egui_phosphor::regular::MUSIC_NOTES, "AUDIO"),
+                    MainCategory::Sidecars => (egui_phosphor::regular::PACKAGE, "SIDECARS"),
+                };
 
-        for main_cat in MainCategory::all() {
-            let is_selected = app.library.active_main_category == *main_cat;
-            let (icon, label_text) = match main_cat {
-                MainCategory::Audio => (egui_phosphor::regular::MUSIC_NOTES, "AUDIO"),
-                MainCategory::Sidecars => (egui_phosphor::regular::PACKAGE, "SIDECARS"),
-            };
+                let bg = if is_selected { theme.accent.linear_multiply(0.18) } else { theme.bg_inset };
+                let border = if is_selected { theme.accent } else { theme.border_stroke.color };
 
-            let text = RichText::new(format!("{} {}", icon, label_text))
-                .size(theme.type_caption + 1.0)
-                .strong();
+                let card = Frame::none()
+                    .fill(bg)
+                    .rounding(Rounding::same(theme.radius_sm))
+                    .stroke(Stroke::new(1.0_f32, border))
+                    .inner_margin(Margin::symmetric(theme.space_sm, theme.space_xs));
 
-            if ui.selectable_label(is_selected, text).clicked() {
-                app.library.active_main_category = *main_cat;
-                app.library.library_needs_refresh = true;
+                let resp = card.show(ui, |ui| {
+                    ui.set_width((ui.available_width() - theme.space_xs) * 0.5);
+                    ui.centered_and_justified(|ui| {
+                        ui.label(
+                            RichText::new(format!("{} {}", icon, label_text))
+                                .size(theme.type_caption)
+                                .strong()
+                                .color(if is_selected { theme.accent } else { theme.text_primary }),
+                        );
+                    });
+                }).response;
+
+                if resp.interact(egui::Sense::click()).clicked() {
+                    app.library.active_main_category = *main_cat;
+                    app.library.library_needs_refresh = true;
+                }
             }
-        }
-    });
+        });
 
     ui.add_space(theme.space_sm);
 
-    // Subcategory Chips
+    // Subcategories Grid
     ui.label(
         RichText::new("SUBCATEGORIES")
             .size(theme.type_caption)
@@ -164,64 +182,112 @@ fn render_categories_header(app: &mut InspectorApp, ui: &mut Ui) {
     );
     ui.add_space(theme.space_xs);
 
-    ui.horizontal_wrapped(|ui| {
-        ui.spacing_mut().item_spacing = egui::vec2(theme.space_xs, theme.space_xs);
+    let sub_cols = 2;
+    egui::Grid::new("lib_sub_cat_grid")
+        .num_columns(sub_cols)
+        .spacing([theme.space_xs, theme.space_xs])
+        .show(ui, |ui| {
+            match app.library.active_main_category {
+                MainCategory::Audio => {
+                    let mut items = Vec::new();
+                    for sub in AudioSubcategory::all() {
+                        let icon = match sub {
+                            AudioSubcategory::All => egui_phosphor::regular::STACK,
+                            AudioSubcategory::Tracks => egui_phosphor::regular::DISC,
+                            AudioSubcategory::Samples => egui_phosphor::regular::WAVEFORM,
+                            AudioSubcategory::Stems => egui_phosphor::regular::LIGHTNING,
+                        };
+                        items.push((format!("{} {}", icon, sub.name().to_uppercase()), app.library.active_audio_sub == *sub && app.library.active_crate.is_none(), Some(*sub), None));
+                    }
+                    for crate_name in app.library.cached_crates.clone() {
+                        if ["track", "sample", "sequence", "instrument", "insert", "visual", "stems"].contains(&crate_name.as_str()) {
+                            continue;
+                        }
+                        let is_sel = app.library.active_crate.as_deref() == Some(crate_name.as_str());
+                        items.push((format!("{} {}", egui_phosphor::regular::TAG, crate_name), is_sel, None, Some(crate_name)));
+                    }
+                    for smart in app.library.cached_smart_crates.clone() {
+                        let is_sel = app.library.active_crate.as_deref() == Some(smart.name.as_str());
+                        items.push((format!("{} {}", egui_phosphor::regular::STAR, smart.name.clone()), is_sel, None, Some(smart.name)));
+                    }
 
-        match app.library.active_main_category {
-            MainCategory::Audio => {
-                for sub in AudioSubcategory::all() {
-                    let is_selected = app.library.active_audio_sub == *sub && app.library.active_crate.is_none();
-                    let icon = match sub {
-                        AudioSubcategory::All => egui_phosphor::regular::STACK,
-                        AudioSubcategory::Tracks => egui_phosphor::regular::DISC,
-                        AudioSubcategory::Samples => egui_phosphor::regular::WAVEFORM,
-                        AudioSubcategory::Stems => egui_phosphor::regular::LIGHTNING,
-                    };
+                    for (idx, (label, is_sel, sub_opt, crate_opt)) in items.iter().enumerate() {
+                        let bg = if *is_sel { theme.accent.linear_multiply(0.18) } else { theme.bg_inset };
+                        let border = if *is_sel { theme.accent } else { theme.border_stroke.color };
 
-                    if ui.selectable_label(is_selected, format!("{} {}", icon, sub.name().to_uppercase())).clicked() {
-                        app.library.active_audio_sub = *sub;
-                        app.library.active_crate = None;
-                        app.library.library_needs_refresh = true;
+                        let card = Frame::none()
+                            .fill(bg)
+                            .rounding(Rounding::same(theme.radius_sm))
+                            .stroke(Stroke::new(1.0_f32, border))
+                            .inner_margin(Margin::symmetric(theme.space_xs, 4.0));
+
+                        let resp = card.show(ui, |ui| {
+                            ui.set_width((ui.available_width() - theme.space_xs) * 0.5);
+                            ui.add(egui::Label::new(
+                                RichText::new(label)
+                                    .size(theme.type_caption - 1.0)
+                                    .strong()
+                                    .color(if *is_sel { theme.accent } else { theme.text_primary }),
+                            ).truncate());
+                        }).response;
+
+                        if resp.interact(egui::Sense::click()).clicked() {
+                            if let Some(sub) = sub_opt {
+                                app.library.active_audio_sub = *sub;
+                                app.library.active_crate = None;
+                            } else if let Some(c) = crate_opt {
+                                app.library.active_crate = Some(c.clone());
+                            }
+                            app.library.library_needs_refresh = true;
+                        }
+
+                        if (idx + 1) % sub_cols == 0 {
+                            ui.end_row();
+                        }
                     }
                 }
+                MainCategory::Sidecars => {
+                    for (idx, sub) in SidecarSubcategory::all().iter().enumerate() {
+                        let is_selected = app.library.active_sidecar_sub == *sub;
+                        let icon = match sub {
+                            SidecarSubcategory::All => egui_phosphor::regular::PACKAGE,
+                            SidecarSubcategory::AudioInstruments => egui_phosphor::regular::PIANO_KEYS,
+                            SidecarSubcategory::AudioInserts => egui_phosphor::regular::SLIDERS_HORIZONTAL,
+                            SidecarSubcategory::VisualInstruments => egui_phosphor::regular::APERTURE,
+                            SidecarSubcategory::VisualInserts => egui_phosphor::regular::EYE,
+                        };
 
-                for crate_name in app.library.cached_crates.clone() {
-                    if ["track", "sample", "sequence", "instrument", "insert", "visual", "stems"].contains(&crate_name.as_str()) {
-                        continue;
-                    }
-                    let is_selected = app.library.active_crate.as_deref() == Some(crate_name.as_str());
-                    if ui.selectable_label(is_selected, format!("{} {}", egui_phosphor::regular::TAG, crate_name)).clicked() {
-                        app.library.active_crate = Some(crate_name);
-                        app.library.library_needs_refresh = true;
-                    }
-                }
+                        let label = format!("{} {}", icon, sub.name().to_uppercase());
+                        let bg = if is_selected { theme.accent.linear_multiply(0.18) } else { theme.bg_inset };
+                        let border = if is_selected { theme.accent } else { theme.border_stroke.color };
 
-                for smart in app.library.cached_smart_crates.clone() {
-                    let is_selected = app.library.active_crate.as_deref() == Some(smart.name.as_str());
-                    if ui.selectable_label(is_selected, format!("{} {}", egui_phosphor::regular::STAR, smart.name)).clicked() {
-                        app.library.active_crate = Some(smart.name);
-                        app.library.library_needs_refresh = true;
+                        let card = Frame::none()
+                            .fill(bg)
+                            .rounding(Rounding::same(theme.radius_sm))
+                            .stroke(Stroke::new(1.0_f32, border))
+                            .inner_margin(Margin::symmetric(theme.space_xs, 4.0));
+
+                        let resp = card.show(ui, |ui| {
+                            ui.set_width((ui.available_width() - theme.space_xs) * 0.5);
+                            ui.add(egui::Label::new(
+                                RichText::new(&label)
+                                    .size(theme.type_caption - 1.0)
+                                    .strong()
+                                    .color(if is_selected { theme.accent } else { theme.text_primary }),
+                            ).truncate());
+                        }).response;
+
+                        if resp.interact(egui::Sense::click()).clicked() {
+                            app.library.active_sidecar_sub = *sub;
+                        }
+
+                        if (idx + 1) % sub_cols == 0 {
+                            ui.end_row();
+                        }
                     }
                 }
             }
-            MainCategory::Sidecars => {
-                for sub in SidecarSubcategory::all() {
-                    let is_selected = app.library.active_sidecar_sub == *sub;
-                    let icon = match sub {
-                        SidecarSubcategory::All => egui_phosphor::regular::PACKAGE,
-                        SidecarSubcategory::AudioInstruments => egui_phosphor::regular::PIANO_KEYS,
-                        SidecarSubcategory::AudioInserts => egui_phosphor::regular::SLIDERS_HORIZONTAL,
-                        SidecarSubcategory::VisualInstruments => egui_phosphor::regular::APERTURE,
-                        SidecarSubcategory::VisualInserts => egui_phosphor::regular::EYE,
-                    };
-
-                    if ui.selectable_label(is_selected, format!("{} {}", icon, sub.name().to_uppercase())).clicked() {
-                        app.library.active_sidecar_sub = *sub;
-                    }
-                }
-            }
-        }
-    });
+        });
 }
 
 fn render_toolbar(app: &mut InspectorApp, ui: &mut Ui) {
