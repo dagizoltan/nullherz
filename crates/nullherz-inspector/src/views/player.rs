@@ -12,7 +12,6 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
     let deck_color = crate::InspectorApp::deck_color(&theme, deck_idx);
 
     ui.horizontal(|ui| {
-        ui.heading(RichText::new("ADVANCED PERFORMANCE PLAYER").strong().color(theme.text_primary).size(theme.type_heading));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.label(RichText::new(format!("FOCUS: DECK {}", deck_char)).strong().color(deck_color).size(theme.type_label));
         });
@@ -359,7 +358,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
     // Modern Library Browser with load buttons targeting focused deck
     ui.horizontal(|ui| {
-        ui.heading(RichText::new("Precision Library Browser").size(theme.type_heading));
+        ui.label(RichText::new("Precision Library Browser").strong().size(theme.type_label));
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.text_edit_singleline(&mut app.library.search_query);
             ui.label(egui_phosphor::regular::MAGNIFYING_GLASS);
@@ -404,7 +403,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
         });
 
         ui.add_space(theme.space_lg);
-        ui.heading(RichText::new("Playlist Queue").size(theme.type_heading));
+        ui.label(RichText::new("Playlist Queue").strong().size(theme.type_label));
         let mut to_remove = None;
         for (idx, &track_id) in app.library.playlist_queue.iter().enumerate() {
             if let Some(track) = app.get_cached_track(track_id) {

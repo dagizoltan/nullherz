@@ -5,8 +5,6 @@ use nullherz_traits::{Command, MixerCommand};
 
 pub fn render(app: &mut InspectorApp, ui: &mut Ui, _telemetry: &Option<Telemetry>) {
     let theme = app.theme;
-    ui.heading(RichText::new("Modulation Routing Matrix").size(theme.type_heading));
-    ui.add_space(theme.space_sm);
 
     // Card 1: FFT Windowing Configuration
     Frame::none()

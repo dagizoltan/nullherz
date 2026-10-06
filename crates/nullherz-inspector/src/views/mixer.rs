@@ -13,7 +13,6 @@ pub const VERTICAL_WAVEFORM_H: f32 = 200.0;
 
 pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>) {
     let theme = app.theme;
-    ui.heading(RichText::new("System Mixer").size(theme.type_heading));
 
     // Align channel list and master to the bottom of the mixer page
     ui.with_layout(egui::Layout::bottom_up(egui::Align::LEFT), |ui| {

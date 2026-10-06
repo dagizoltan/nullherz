@@ -86,8 +86,6 @@ impl BreederView {
 
     pub fn show(ui: &mut Ui, state: &mut BreederView, telemetry: &Option<audio_core::Telemetry>, app: &mut crate::InspectorApp) {
         let theme = app.theme;
-        ui.heading(RichText::new("DNA Breeder & Transfusion Engine").size(theme.type_heading));
-        ui.add_space(theme.space_xs);
 
         // Workflow Mode Switcher Header
         ui.horizontal(|ui| {

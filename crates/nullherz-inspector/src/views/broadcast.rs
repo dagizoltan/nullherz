@@ -32,9 +32,6 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
         app.broadcast.is_streaming = false;
     }
 
-    ui.heading("Global Broadcast Console");
-    ui.add_space(10.0);
-
     // Production-Grade Telemetry Banner
     ui.horizontal(|ui| {
         ui.label(RichText::new("✔ LIVE TELEMETRY: Connected directly to streaming_manager.rs and active RTMP/Opus broadcast sockets.").size(9.0).color(app.theme.success));
