@@ -74,11 +74,11 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
     // Modern Studio Transport Bar
     ui.horizontal(|ui| {
         let is_recording = app.composer.record_automation;
-        if ui.add(egui::Button::new(RichText::new(format!("{} REC", egui_phosphor::regular::RECORD)).size(9.0).strong()).fill(if is_recording { app.theme.danger } else { app.theme.bg_inset })).on_hover_text("Record Automation").clicked() {
+        let rec_bg = if is_recording { app.theme.danger } else { app.theme.bg_inset };
+        let rec_icon_col = if is_recording { Color32::WHITE } else { app.theme.danger };
+        if ui.add_sized([28.0, 24.0], egui::Button::new(RichText::new(egui_phosphor::regular::RECORD).size(12.0).strong().color(rec_icon_col)).fill(rec_bg)).on_hover_text("Record Automation / Sequencer Steps").clicked() {
             app.composer.record_automation = !app.composer.record_automation;
         }
-
-        ui.add_space(app.theme.space_xs);
 
         let play_icon = if app.composer.composer_playing { egui_phosphor::regular::PAUSE } else { egui_phosphor::regular::PLAY };
         let play_bg = if app.composer.composer_playing { app.theme.success } else { app.theme.bg_inset };
@@ -307,7 +307,8 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                         // ACCORDION EXPANSION: Render subchannel/pad headers directly below selected track
                         if is_selected {
                             ui.add_space(2.0);
-                            for pad_i in 0..16 {
+                            let sub_count = app.composer.visible_subchannel_count[track_idx];
+                            for pad_i in 0..sub_count {
                                 ui.allocate_ui_with_layout(Vec2::new(175.0, 20.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
                                     let (rect, _) = ui.allocate_exact_size(Vec2::new(175.0, 20.0), Sense::hover());
                                     ui.painter().rect_filled(rect, Rounding::same(2.0), app.theme.bg_inset);
@@ -319,6 +320,12 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                         track_color,
                                     );
                                 });
+                                ui.add_space(1.0);
+                            }
+                            if sub_count < 16 {
+                                if ui.add_sized([175.0, 20.0], egui::Button::new(RichText::new("➕ ADD SAMPLE").size(9.0).color(app.theme.accent))).clicked() {
+                                    app.composer.visible_subchannel_count[track_idx] = (sub_count + 1).min(16);
+                                }
                                 ui.add_space(1.0);
                             }
                         }
@@ -484,7 +491,8 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                 // ACCORDION EXPANSION: Render subchannel/pad step matrix directly below selected track
                                 if is_selected {
                                     ui.add_space(2.0);
-                                    for pad_i in 0..16 {
+                                    let sub_count = app.composer.visible_subchannel_count[track_idx];
+                                    for pad_i in 0..sub_count {
                                         ui.allocate_ui_with_layout(Vec2::new(ui.available_width(), 20.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
                                             ui.spacing_mut().item_spacing = Vec2::new(2.0, 0.0);
                                             for slot_idx in 0..steps_count {
@@ -522,6 +530,10 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                                 }
                                             }
                                         });
+                                        ui.add_space(1.0);
+                                    }
+                                    if sub_count < 16 {
+                                        ui.allocate_space(Vec2::new(ui.available_width(), 20.0));
                                         ui.add_space(1.0);
                                     }
                                 }
@@ -633,7 +645,8 @@ pub fn render_clip_editor_drawer_panel(app: &mut InspectorApp, ui: &mut Ui) {
         .id_source("bottom_drawer_clip_editor_scroll")
         .show(ui, |ui| {
             ui.vertical(|ui| {
-                for pad_i in 0..16 {
+                let sub_count = app.composer.visible_subchannel_count[selected_trk];
+                for pad_i in 0..sub_count {
                     ui.horizontal(|ui| {
                         ui.spacing_mut().item_spacing = Vec2::new(2.0, 0.0);
 
@@ -699,6 +712,11 @@ pub fn render_clip_editor_drawer_panel(app: &mut InspectorApp, ui: &mut Ui) {
                         }
                     });
                     ui.add_space(1.0);
+                }
+                if sub_count < 16 {
+                    if ui.add_sized([130.0, 20.0], egui::Button::new(RichText::new("➕ ADD SAMPLE").size(9.0).color(theme.accent))).clicked() {
+                        app.composer.visible_subchannel_count[selected_trk] = (sub_count + 1).min(16);
+                    }
                 }
             });
         });

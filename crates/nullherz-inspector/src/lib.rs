@@ -121,7 +121,8 @@ pub enum BottomDrawer {
 pub enum RightTab {
     Library,
     Store,
-    Metrics,
+    PerformanceMetrics,
+    DnaMetrics,
     Notifications,
     GeneticCloud,
 }
@@ -979,7 +980,8 @@ impl InspectorApp {
                                     (RightTab::Store, egui_phosphor::regular::SHOPPING_BAG, "STORE"),
                                     (RightTab::GeneticCloud, egui_phosphor::regular::CLOUD, "CLOUD"),
                                     (RightTab::Notifications, egui_phosphor::regular::BRAIN, "AI"),
-                                    (RightTab::Metrics, egui_phosphor::regular::CHART_BAR, "METRICS"),
+                                    (RightTab::PerformanceMetrics, egui_phosphor::regular::GAUGE, "PERF"),
+                                    (RightTab::DnaMetrics, egui_phosphor::regular::DNA, "DNA"),
                                 ];
 
                                 for (t_val, icon, label) in tabs {
@@ -1010,7 +1012,8 @@ impl InspectorApp {
                                 RightTab::Store => views::store::render_sidebar(self, ui),
                                 RightTab::GeneticCloud => views::genetic_cloud::render(self, ui),
                                 RightTab::Notifications => views::notifications::render(self, ui),
-                                RightTab::Metrics => views::metrics::render(self, ui),
+                                RightTab::PerformanceMetrics => views::metrics::render_performance(self, ui),
+                                RightTab::DnaMetrics => views::metrics::render_dna(self, ui),
                             }
                         });
                 });
@@ -1088,7 +1091,8 @@ impl InspectorApp {
                         (RightTab::Store, egui_phosphor::regular::SHOPPING_BAG, "STORE"),
                         (RightTab::GeneticCloud, egui_phosphor::regular::CLOUD, "GENETIC CLOUD"),
                         (RightTab::Notifications, egui_phosphor::regular::BRAIN, "AI & INSIGHTS"),
-                        (RightTab::Metrics, egui_phosphor::regular::CHART_BAR, "METRICS"),
+                        (RightTab::PerformanceMetrics, egui_phosphor::regular::GAUGE, "PERFORMANCE"),
+                        (RightTab::DnaMetrics, egui_phosphor::regular::DNA, "SOUNDDNA"),
                     ];
 
                     for (tab, icon, label) in tabs.into_iter().rev() {
@@ -1628,9 +1632,8 @@ impl eframe::App for InspectorApp {
 
                 let v_focused = v_ctx.input(|i| i.focused);
 
-                // Render left & right sidebars and bottom bar for detached viewport
+                // Render left sidebar and bottom bar for detached viewport (right sidebar closed)
                 self.render_left_sidebar(v_ctx, &mut current_detached_view, &view_name);
-                self.render_right_sidebar(v_ctx, &view_name);
                 self.render_bottom_bar(v_ctx, &telemetry, &view_name);
 
                 egui::CentralPanel::default().show(v_ctx, |ui| {
