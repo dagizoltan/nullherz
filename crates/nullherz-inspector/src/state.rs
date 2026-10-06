@@ -592,6 +592,7 @@ pub struct ComposerState {
     /// Sample assigned to each sequencer track, independent of the decks.
     pub track_sources: [Option<u64>; 16],
     /// Independent subchannel/pad sample assignments for each parent track [parent_track_idx][subchannel_idx].
+    #[allow(dead_code)]
     pub subchannel_sources: [[Option<u64>; 16]; 16],
     pub keyboard_grid: KeyboardGridState,
     /// Step grids PER DECK: legacy deck sequencer step grids.
@@ -604,6 +605,7 @@ pub struct ComposerState {
     pub visible_subchannel_count: [usize; 16],
     pub selected_composer_track: Option<usize>,
     pub selected_clip: Option<(usize, usize)>,
+    #[allow(dead_code)]
     pub clip_editor_drawer_open: bool,
     pub sequencer_active_step: usize,
     pub composer_playing: bool,
