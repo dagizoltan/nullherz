@@ -124,7 +124,9 @@ fn render_categories_header(app: &mut InspectorApp, ui: &mut Ui, is_sidebar: boo
     let theme = app.theme;
     let col_spacing = theme.space_xs;
     let avail_w = ui.available_width();
-    let item_w = ((avail_w - col_spacing) * 0.5).floor().max(60.0);
+    let main_item_w = ((avail_w - col_spacing) * 0.5).floor().max(60.0);
+    let sub_cols = 4;
+    let sub_item_w = ((avail_w - col_spacing * (sub_cols - 1) as f32) / sub_cols as f32).floor().max(40.0);
 
     // Main Category Selector Grid
     ui.label(
@@ -153,10 +155,10 @@ fn render_categories_header(app: &mut InspectorApp, ui: &mut Ui, is_sidebar: boo
                     .fill(bg)
                     .rounding(Rounding::same(theme.radius_sm))
                     .stroke(Stroke::new(1.0_f32, border))
-                    .inner_margin(Margin::symmetric(theme.space_xs, 4.0));
+                    .inner_margin(Margin::symmetric(theme.space_xs, 5.0));
 
                 let resp = card.show(ui, |ui| {
-                    ui.set_width(item_w);
+                    ui.set_width(main_item_w);
                     ui.centered_and_justified(|ui| {
                         ui.label(
                             RichText::new(format!("{} {}", icon, label_text))
@@ -176,7 +178,7 @@ fn render_categories_header(app: &mut InspectorApp, ui: &mut Ui, is_sidebar: boo
 
     ui.add_space(theme.space_sm);
 
-    // Subcategories Grid
+    // Subcategories Card Grid (4 Columns)
     ui.label(
         RichText::new("SUBCATEGORIES")
             .size(theme.type_caption)
@@ -185,7 +187,6 @@ fn render_categories_header(app: &mut InspectorApp, ui: &mut Ui, is_sidebar: boo
     );
     ui.add_space(theme.space_xs);
 
-    let sub_cols = 2;
     egui::Grid::new("lib_sub_cat_grid")
         .num_columns(sub_cols)
         .spacing([col_spacing, col_spacing])
@@ -222,16 +223,18 @@ fn render_categories_header(app: &mut InspectorApp, ui: &mut Ui, is_sidebar: boo
                             .fill(bg)
                             .rounding(Rounding::same(theme.radius_sm))
                             .stroke(Stroke::new(1.0_f32, border))
-                            .inner_margin(Margin::symmetric(theme.space_xs, 4.0));
+                            .inner_margin(Margin::symmetric(theme.space_xs, 5.0));
 
                         let resp = card.show(ui, |ui| {
-                            ui.set_width(item_w);
-                            ui.add(egui::Label::new(
-                                RichText::new(label)
-                                    .size(if is_sidebar { theme.type_caption - 1.0 } else { theme.type_caption - 0.5 })
-                                    .strong()
-                                    .color(if *is_sel { theme.accent } else { theme.text_primary }),
-                            ).truncate());
+                            ui.set_width(sub_item_w);
+                            ui.centered_and_justified(|ui| {
+                                ui.add(egui::Label::new(
+                                    RichText::new(label)
+                                        .size(if is_sidebar { theme.type_caption - 1.5 } else { theme.type_caption - 0.5 })
+                                        .strong()
+                                        .color(if *is_sel { theme.accent } else { theme.text_primary }),
+                                ).truncate());
+                            });
                         }).response;
 
                         if resp.interact(egui::Sense::click()).clicked() {
@@ -268,16 +271,18 @@ fn render_categories_header(app: &mut InspectorApp, ui: &mut Ui, is_sidebar: boo
                             .fill(bg)
                             .rounding(Rounding::same(theme.radius_sm))
                             .stroke(Stroke::new(1.0_f32, border))
-                            .inner_margin(Margin::symmetric(theme.space_xs, 4.0));
+                            .inner_margin(Margin::symmetric(theme.space_xs, 5.0));
 
                         let resp = card.show(ui, |ui| {
-                            ui.set_width(item_w);
-                            ui.add(egui::Label::new(
-                                RichText::new(&label)
-                                    .size(if is_sidebar { theme.type_caption - 1.0 } else { theme.type_caption - 0.5 })
-                                    .strong()
-                                    .color(if is_selected { theme.accent } else { theme.text_primary }),
-                            ).truncate());
+                            ui.set_width(sub_item_w);
+                            ui.centered_and_justified(|ui| {
+                                ui.add(egui::Label::new(
+                                    RichText::new(&label)
+                                        .size(if is_sidebar { theme.type_caption - 1.5 } else { theme.type_caption - 0.5 })
+                                        .strong()
+                                        .color(if is_selected { theme.accent } else { theme.text_primary }),
+                                ).truncate());
+                            });
                         }).response;
 
                         if resp.interact(egui::Sense::click()).clicked() {

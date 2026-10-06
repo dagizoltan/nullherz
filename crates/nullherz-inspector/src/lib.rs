@@ -1001,15 +1001,18 @@ impl InspectorApp {
                         });
 
                     ui.separator();
-                    ui.add_space(self.theme.space_sm);
 
-                    match tab {
-                        RightTab::Library => views::library::render_sidebar(self, ui),
-                        RightTab::Store => views::store::render_sidebar(self, ui),
-                        RightTab::GeneticCloud => views::genetic_cloud::render(self, ui),
-                        RightTab::Notifications => views::notifications::render(self, ui),
-                        RightTab::Metrics => views::metrics::render(self, ui),
-                    }
+                    egui::Frame::none()
+                        .inner_margin(egui::Margin::symmetric(self.theme.space_md, self.theme.space_sm))
+                        .show(ui, |ui| {
+                            match tab {
+                                RightTab::Library => views::library::render_sidebar(self, ui),
+                                RightTab::Store => views::store::render_sidebar(self, ui),
+                                RightTab::GeneticCloud => views::genetic_cloud::render(self, ui),
+                                RightTab::Notifications => views::notifications::render(self, ui),
+                                RightTab::Metrics => views::metrics::render(self, ui),
+                            }
+                        });
                 });
         }
     }
