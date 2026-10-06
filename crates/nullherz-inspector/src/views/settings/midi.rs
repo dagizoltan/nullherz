@@ -170,39 +170,55 @@ pub fn render_midi(app: &mut InspectorApp, ui: &mut Ui) {
             ui.label(RichText::new("Active Control Mapping Layout Scheme:").strong().size(theme.type_caption).color(theme.text_primary));
             ui.add_space(theme.space_xs);
 
-            ui.columns(3, |cols| {
-                cols[0].group(|ui| {
-                    ui.label(RichText::new("DECK & TRANSPORT").strong().size(10.0).color(theme.accent));
-                    ui.add_space(2.0);
-                    ui.label(RichText::new("• Play / Pause: Note 0x0B / CC 11").size(9.0).color(theme.text_secondary));
-                    ui.label(RichText::new("• Cue Point Set: Note 0x0C / CC 12").size(9.0).color(theme.text_secondary));
-                    ui.label(RichText::new("• Tempo Pitch Fader: CC 16 (0..127)").size(9.0).color(theme.text_secondary));
-                    ui.label(RichText::new("• Jog Wheel Nudge: CC 33 / CC 34").size(9.0).color(theme.text_secondary));
-                    ui.label(RichText::new("• Slip Mode Toggle: Note 0x20").size(9.0).color(theme.text_secondary));
-                    ui.label(RichText::new("• Loop In / Out / Exit: Notes 0x18..0x1A").size(9.0).color(theme.text_secondary));
-                });
+            ui.vertical(|ui| {
+                Frame::none()
+                    .fill(theme.bg_inset)
+                    .rounding(theme.radius_sm)
+                    .inner_margin(theme.space_sm)
+                    .show(ui, |ui| {
+                        ui.label(RichText::new("DECK & TRANSPORT").strong().size(10.0).color(theme.accent));
+                        ui.add_space(2.0);
+                        ui.label(RichText::new("• Play / Pause: Note 0x0B / CC 11").size(9.0).color(theme.text_secondary));
+                        ui.label(RichText::new("• Cue Point Set: Note 0x0C / CC 12").size(9.0).color(theme.text_secondary));
+                        ui.label(RichText::new("• Tempo Pitch Fader: CC 16 (0..127)").size(9.0).color(theme.text_secondary));
+                        ui.label(RichText::new("• Jog Wheel Nudge: CC 33 / CC 34").size(9.0).color(theme.text_secondary));
+                        ui.label(RichText::new("• Slip Mode Toggle: Note 0x20").size(9.0).color(theme.text_secondary));
+                        ui.label(RichText::new("• Loop In / Out / Exit: Notes 0x18..0x1A").size(9.0).color(theme.text_secondary));
+                    });
 
-                cols[1].group(|ui| {
-                    ui.label(RichText::new("MIXER & EQ CANALS").strong().size(10.0).color(theme.accent));
-                    ui.add_space(2.0);
-                    ui.label(RichText::new("• Channel Faders 1..4: CC 20..23").size(9.0).color(theme.text_secondary));
-                    ui.label(RichText::new("• Crossfader: CC 31 (Deck A ↔ Deck B)").size(9.0).color(theme.text_secondary));
-                    ui.label(RichText::new("• Master Volume Fader: CC 7").size(9.0).color(theme.text_secondary));
-                    ui.label(RichText::new("• HI / MID / LOW EQ: CC 40..51").size(9.0).color(theme.text_secondary));
-                    ui.label(RichText::new("• Trim Gain Stage: CC 52..55").size(9.0).color(theme.text_secondary));
-                    ui.label(RichText::new("• Filter LP/HP Sweep: CC 60..63").size(9.0).color(theme.text_secondary));
-                });
+                ui.add_space(theme.space_xs);
 
-                cols[2].group(|ui| {
-                    ui.label(RichText::new("PADS & PERFORMANCE").strong().size(10.0).color(theme.accent));
-                    ui.add_space(2.0);
-                    ui.label(RichText::new("• Hot Cues 1..8: Notes 0x30..0x37").size(9.0).color(theme.text_secondary));
-                    ui.label(RichText::new("• Sampler Pads 1..16: Notes 0x24..0x33").size(9.0).color(theme.text_secondary));
-                    ui.label(RichText::new("• FX Rack Toggle: Notes 0x40..0x43").size(9.0).color(theme.text_secondary));
-                    ui.label(RichText::new("• Beat Jump ±4: Notes 0x38..0x39").size(9.0).color(theme.text_secondary));
-                    ui.label(RichText::new("• Stems Demix Solo: CC 70..73").size(9.0).color(theme.text_secondary));
-                    ui.label(RichText::new("• Visuals SPD/TMP: CC 80..83").size(9.0).color(theme.text_secondary));
-                });
+                Frame::none()
+                    .fill(theme.bg_inset)
+                    .rounding(theme.radius_sm)
+                    .inner_margin(theme.space_sm)
+                    .show(ui, |ui| {
+                        ui.label(RichText::new("MIXER & EQ CANALS").strong().size(10.0).color(theme.accent));
+                        ui.add_space(2.0);
+                        ui.label(RichText::new("• Channel Faders 1..4: CC 20..23").size(9.0).color(theme.text_secondary));
+                        ui.label(RichText::new("• Crossfader: CC 31 (Deck A ↔ Deck B)").size(9.0).color(theme.text_secondary));
+                        ui.label(RichText::new("• Master Volume Fader: CC 7").size(9.0).color(theme.text_secondary));
+                        ui.label(RichText::new("• HI / MID / LOW EQ: CC 40..51").size(9.0).color(theme.text_secondary));
+                        ui.label(RichText::new("• Trim Gain Stage: CC 52..55").size(9.0).color(theme.text_secondary));
+                        ui.label(RichText::new("• Filter LP/HP Sweep: CC 60..63").size(9.0).color(theme.text_secondary));
+                    });
+
+                ui.add_space(theme.space_xs);
+
+                Frame::none()
+                    .fill(theme.bg_inset)
+                    .rounding(theme.radius_sm)
+                    .inner_margin(theme.space_sm)
+                    .show(ui, |ui| {
+                        ui.label(RichText::new("PADS & PERFORMANCE").strong().size(10.0).color(theme.accent));
+                        ui.add_space(2.0);
+                        ui.label(RichText::new("• Hot Cues 1..8: Notes 0x30..0x37").size(9.0).color(theme.text_secondary));
+                        ui.label(RichText::new("• Sampler Pads 1..16: Notes 0x24..0x33").size(9.0).color(theme.text_secondary));
+                        ui.label(RichText::new("• FX Rack Toggle: Notes 0x40..0x43").size(9.0).color(theme.text_secondary));
+                        ui.label(RichText::new("• Beat Jump ±4: Notes 0x38..0x39").size(9.0).color(theme.text_secondary));
+                        ui.label(RichText::new("• Stems Demix Solo: CC 70..73").size(9.0).color(theme.text_secondary));
+                        ui.label(RichText::new("• Visuals SPD/TMP: CC 80..83").size(9.0).color(theme.text_secondary));
+                    });
             });
         });
 
