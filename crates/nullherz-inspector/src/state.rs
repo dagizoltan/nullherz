@@ -731,12 +731,18 @@ impl Default for SamplerState {
     }
 }
 
-/// Audio editor selection, stretch controls, zoom, and scroll.
+/// Audio editor selection, stretch controls, pitch shift, gain, zoom, and scroll state.
 pub struct EditorState {
     pub editor_selection: Option<(f32, f32)>,
     pub editor_time_stretch_ratio: f32,
+    pub editor_pitch_shift_semitones: f32,
+    pub editor_gain_trim: f32,
+    pub editor_transient_sensitivity: f32,
     pub editor_waveform_zoom: f32,
     pub editor_waveform_scroll: f32,
+    pub editor_playhead_pos: f32,
+    pub editor_is_playing: bool,
+    pub editor_is_looping: bool,
 }
 
 impl Default for EditorState {
@@ -744,8 +750,14 @@ impl Default for EditorState {
         Self {
             editor_selection: None,
             editor_time_stretch_ratio: 1.0,
+            editor_pitch_shift_semitones: 0.0,
+            editor_gain_trim: 1.0,
+            editor_transient_sensitivity: 0.5,
             editor_waveform_zoom: 1.0,
             editor_waveform_scroll: 0.0,
+            editor_playhead_pos: 0.0,
+            editor_is_playing: false,
+            editor_is_looping: false,
         }
     }
 }

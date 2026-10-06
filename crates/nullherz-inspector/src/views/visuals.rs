@@ -867,7 +867,7 @@ pub fn render_detached_interactive_surface(
 
 /// Render the Visual Mixer View page
 pub fn render_visuals_view(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry: &Option<Telemetry>) {
-    const VIZ_STRIP_W: f32 = 140.0;
+    const VIZ_STRIP_W: f32 = 152.0;
 
     let theme = app.theme.clone();
 
@@ -891,17 +891,28 @@ pub fn render_visuals_view(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry:
                     // Screen Row Header
                     ui.horizontal(|ui| {
                         ui.label(egui::RichText::new(format!("SCREEN: {}", screen_name)).strong().size(theme.type_body).color(theme.accent));
-                        ui.add_space(8.0);
+                        ui.add_space(theme.space_xs);
 
                         // Layout Mode Selector
                         egui::ComboBox::from_id_source(format!("screen_layout_cb_{}", s_idx))
-                            .selected_text(egui::RichText::new(current_layout_mode.name()).size(9.0).strong().color(theme.text_primary))
+                            .selected_text(egui::RichText::new(current_layout_mode.name()).size(10.0).strong().color(theme.text_primary))
                             .show_ui(ui, |ui| {
                                 for mode in state::CompositingLayoutMode::all() {
                                     if ui.selectable_label(app.viz.target_screens[s_idx].layout_mode == *mode, mode.name()).clicked() {
                                         app.viz.target_screens[s_idx].layout_mode = *mode;
                                     }
                                 }
+                            });
+
+                        // Active Layer Count & Status Badges
+                        let active_layer_count = app.viz.channels.iter().filter(|c| c.target_screen_id == screen_id && !c.is_muted).count();
+                        egui::Frame::none()
+                            .fill(theme.bg_inset)
+                            .rounding(egui::Rounding::same(theme.radius_sm))
+                            .inner_margin(egui::Margin::symmetric(6.0, 2.0))
+                            .stroke(egui::Stroke::new(1.0, theme.border_stroke.color))
+                            .show(ui, |ui| {
+                                ui.label(egui::RichText::new(format!("{} LAYERS ACTIVE", active_layer_count)).size(9.0).strong().color(theme.success));
                             });
 
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
@@ -937,16 +948,21 @@ pub fn render_visuals_view(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry:
                         egui::Frame::none()
                             .fill(theme.bg_inset)
                             .rounding(egui::Rounding::same(theme.radius_sm))
-                            .inner_margin(egui::Margin::same(4.0))
+                            .inner_margin(egui::Margin::same(6.0))
                             .stroke(egui::Stroke::new(1.0_f32, theme.border_stroke.color))
                             .show(ui, |ui| {
-                                ui.set_width(240.0);
+                                ui.set_width(250.0);
                                 ui.vertical_centered(|ui| {
-                                    ui.label(egui::RichText::new("COMPOSITE PREVIEW").size(8.5).strong().color(theme.text_secondary));
+                                    ui.horizontal(|ui| {
+                                        ui.label(egui::RichText::new("COMPOSITE PREVIEW").size(9.0).strong().color(theme.text_secondary));
+                                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                            ui.label(egui::RichText::new("1080p").size(9.0).strong().color(theme.accent));
+                                        });
+                                    });
                                     ui.add_space(2.0);
 
                                     ui.group(|ui| {
-                                        ui.set_height(130.0);
+                                        ui.set_height(135.0);
                                         render_composite_target_screen(app, &screen_id, ui, telemetry);
                                     });
                                 });
