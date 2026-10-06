@@ -4,7 +4,8 @@ use nullherz_traits::AudioBackendType;
 
 pub fn render_audio(app: &mut InspectorApp, ui: &mut Ui) {
     let theme = app.theme;
-    ui.strong("Audio Engine Configuration");
+
+    ui.label(RichText::new("AUDIO BACKEND & DRIVER CONFIGURATION").small().strong().color(theme.text_secondary));
     ui.add_space(theme.space_xs);
     Frame::none()
         .fill(theme.bg_surface)
@@ -189,7 +190,7 @@ pub fn render_audio(app: &mut InspectorApp, ui: &mut Ui) {
         });
 
     ui.add_space(theme.space_md);
-    ui.strong("Engine Performance Profile Presets");
+    ui.label(RichText::new("PERFORMANCE PROFILE PRESETS").small().strong().color(theme.text_secondary));
     ui.add_space(theme.space_xs);
     Frame::none()
         .fill(theme.bg_surface)
@@ -289,7 +290,7 @@ pub fn render_audio(app: &mut InspectorApp, ui: &mut Ui) {
         });
 
     ui.add_space(theme.space_md);
-    ui.strong("Real-Time System Environment & Process Permissions");
+    ui.label(RichText::new("REAL-TIME KERNEL & PROCESS PERMISSIONS").small().strong().color(theme.text_secondary));
     ui.add_space(theme.space_xs);
     Frame::none()
         .fill(theme.bg_surface)
@@ -374,7 +375,7 @@ pub fn render_audio(app: &mut InspectorApp, ui: &mut Ui) {
         });
 
     ui.add_space(theme.space_md);
-    ui.strong("Soundcard Wiring Test");
+    ui.label(RichText::new("SOUNDCARD OUTPUT WIRING TEST").small().strong().color(theme.text_secondary));
     ui.add_space(theme.space_xs);
     Frame::none()
         .fill(theme.bg_surface)

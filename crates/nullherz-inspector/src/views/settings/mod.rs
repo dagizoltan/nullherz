@@ -19,43 +19,59 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
     let theme = app.theme;
 
     // Two-Column Vertical Tab Layout
-    ui.columns(2, |columns| {
-        // Left column (width adjusted for sidebar navigation)
-        let left_ui = &mut columns[0];
-        left_ui.set_max_width(180.0);
-        left_ui.vertical(|ui| {
-            ui.label(RichText::new("SECTIONS").small().strong().color(theme.text_secondary));
-            ui.add_space(theme.space_xs);
+    ui.horizontal_top(|ui| {
+        // Left column (Sidebar navigation card)
+        egui::Frame::none()
+            .fill(theme.bg_surface)
+            .rounding(theme.radius_md)
+            .stroke(theme.border_stroke)
+            .inner_margin(theme.space_md)
+            .show(ui, |ui| {
+                ui.set_width(180.0);
+                ui.vertical(|ui| {
+                    ui.label(RichText::new("SETTINGS SECTIONS").size(theme.type_caption).strong().color(theme.text_secondary));
+                    ui.add_space(theme.space_sm);
 
-            let options = [
-                (SettingsTab::General, format!("{} GENERAL", egui_phosphor::regular::GEAR)),
-                (SettingsTab::Audio, format!("{} AUDIO", egui_phosphor::regular::SPEAKER_HIGH)),
-                (SettingsTab::Midi, format!("{} MIDI", egui_phosphor::regular::PIANO_KEYS)),
-                (SettingsTab::Network, format!("{} NETWORK", egui_phosphor::regular::GLOBE)),
-                (SettingsTab::Calibration, format!("{} CALIBRATION", egui_phosphor::regular::RULER)),
-                (SettingsTab::Preferences, format!("{} PREFERENCES", egui_phosphor::regular::WRENCH)),
-            ];
+                    let options = [
+                        (SettingsTab::General, format!("{} GENERAL", egui_phosphor::regular::GEAR)),
+                        (SettingsTab::Audio, format!("{} AUDIO", egui_phosphor::regular::SPEAKER_HIGH)),
+                        (SettingsTab::Midi, format!("{} MIDI", egui_phosphor::regular::PIANO_KEYS)),
+                        (SettingsTab::Network, format!("{} NETWORK", egui_phosphor::regular::GLOBE)),
+                        (SettingsTab::Calibration, format!("{} CALIBRATION", egui_phosphor::regular::RULER)),
+                        (SettingsTab::Preferences, format!("{} PREFERENCES", egui_phosphor::regular::SLIDERS)),
+                    ];
 
-            let options_str: Vec<(SettingsTab, &str)> = options.iter().map(|(tab, label)| (*tab, label.as_str())).collect();
+                    for (tab, label) in options {
+                        let is_sel = app.settings.active_settings_tab == tab;
+                        let btn = if is_sel {
+                            egui::Button::new(RichText::new(&label).strong().size(theme.type_caption).color(theme.accent))
+                                .fill(theme.accent.linear_multiply(0.12))
+                        } else {
+                            egui::Button::new(RichText::new(&label).size(theme.type_caption).color(theme.text_primary))
+                                .fill(theme.bg_inset)
+                        };
 
-            nullherz_ui_hal::widgets::render_segmented_control_vertical(
-                ui,
-                &theme,
-                &mut app.settings.active_settings_tab,
-                &options_str,
-                160.0,
-            );
+                        if ui.add_sized([160.0, 28.0], btn).clicked() {
+                            app.settings.active_settings_tab = tab;
+                        }
+                        ui.add_space(theme.space_xs);
+                    }
 
-            ui.add_space(theme.space_lg);
-            if ui.button(RichText::new(format!("{} STOP ENGINE", egui_phosphor::regular::STOP_CIRCLE)).strong().color(theme.danger)).clicked() {
-                let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::Stop));
-            }
-        });
+                    ui.add_space(theme.space_lg);
+                    ui.separator();
+                    ui.add_space(theme.space_sm);
+
+                    if ui.add_sized([160.0, 28.0], egui::Button::new(RichText::new(format!("{} STOP ENGINE", egui_phosphor::regular::STOP_CIRCLE)).strong().size(theme.type_caption).color(theme.danger)).fill(theme.danger.linear_multiply(0.1))).clicked() {
+                        let _ = app.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::Stop));
+                    }
+                });
+            });
+
+        ui.add_space(theme.space_md);
 
         // Right column (scrollable settings pane)
-        let right_ui = &mut columns[1];
-        egui::ScrollArea::vertical().id_source("settings_pane_scroll").show(right_ui, |ui| {
-            ui.set_min_width(380.0);
+        egui::ScrollArea::vertical().id_source("settings_pane_scroll").show(ui, |ui| {
+            ui.set_min_width(420.0);
             match app.settings.active_settings_tab {
                 SettingsTab::General => render_general(app, ui),
                 SettingsTab::Audio => render_audio(app, ui),
