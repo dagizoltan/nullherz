@@ -11,6 +11,7 @@ use crate::midi_mapper::MidiMapper;
 use crate::pattern_manager::PatternManager;
 use crate::clip_orchestrator::ClipOrchestrator;
 use crate::modulation_matrix::ModulationMatrix;
+use nullherz_backends::AudioBackend;
 use nullherz_traits::{Command, telemetry::Telemetry};
 use std::sync::Arc;
 use parking_lot::Mutex;
@@ -518,7 +519,10 @@ impl Conductor {
     pub fn start_backend(&mut self, backend_type: nullherz_traits::AudioBackendType) -> Result<(), String> {
         Self::prepare_realtime_environment();
         let period = Self::effective_period_size(self.period_size);
-        self.engine_coordinator.backend_manager.start(backend_type, period)
+        let res = self.engine_coordinator.backend_manager.start(backend_type, period);
+        self.last_device_scan = None;
+        self.refresh_audio_devices();
+        res
     }
 
     /// The period size to ask the device for, with `NULLHERZ_PERIOD_SIZE`
@@ -611,6 +615,8 @@ impl Conductor {
         if res.is_ok() {
             let _ = self.update_system_config(Some(backend_type), None, None, None, None);
         }
+        self.last_device_scan = None;
+        self.refresh_audio_devices();
         res
     }
 
@@ -1331,12 +1337,31 @@ impl Conductor {
     /// [`Conductor::cached_audio_devices`] for why this must never run per frame.
     fn refresh_audio_devices(&mut self) {
         const RESCAN: std::time::Duration = std::time::Duration::from_secs(5);
-        let due = self.last_device_scan.map(|t| t.elapsed() >= RESCAN).unwrap_or(true);
+        let due = self.cached_audio_devices.is_empty()
+            || self.last_device_scan.map(|t| t.elapsed() >= RESCAN).unwrap_or(true);
         if !due { return; }
         self.last_device_scan = Some(std::time::Instant::now());
+
+        let mut devs = Vec::new();
         if let Some(ref backend) = self.engine_coordinator.backend_manager.backend {
-            self.cached_audio_devices = backend.enumerate_devices();
+            devs = backend.enumerate_devices();
         }
+
+        if devs.is_empty() {
+            #[cfg(target_os = "linux")]
+            {
+                devs = nullherz_backends::AlsaBackend::new().enumerate_devices();
+            }
+            #[cfg(target_os = "macos")]
+            {
+                devs = nullherz_backends::CoreAudioBackend::new().enumerate_devices();
+            }
+            if devs.is_empty() {
+                devs = vec!["default".to_string()];
+            }
+        }
+
+        self.cached_audio_devices = devs;
     }
 
     /// Re-measure resident decoded audio at most twice a second.

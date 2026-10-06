@@ -45,4 +45,8 @@ impl AudioBackend for MockBackend {
     fn stop(&mut self) {
         self.is_running = false;
     }
+
+    fn enumerate_devices(&self) -> Vec<String> {
+        vec!["default".to_string(), "Mock Audio Output 1/2".to_string()]
+    }
 }

@@ -21,7 +21,7 @@ pub use nullherz_traits::{RenderingEngine, AudioBackendType};
 pub trait AudioBackend: Send {
     fn start(&mut self, engine: Arc<Mutex<Option<Arc<dyn RenderingEngine>>>>, period_size: u64) -> Result<(), String>;
     fn stop(&mut self);
-    fn enumerate_devices(&self) -> Vec<String> { Vec::new() }
+    fn enumerate_devices(&self) -> Vec<String> { vec!["default".to_string()] }
 
     /// Buffer underruns this backend has observed since `start`.
     ///

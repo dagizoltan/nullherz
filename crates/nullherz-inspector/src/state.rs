@@ -4,6 +4,7 @@
 //! telemetry, theme, renderers).
 
 use crate::{SettingsTab, View};
+use nullherz_backends::AudioBackend;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum ChannelInputSource {
@@ -809,12 +810,17 @@ pub struct SettingsState {
 
 impl Default for SettingsState {
     fn default() -> Self {
+        let initial_devices = {
+            let devs = nullherz_backends::BackendFactory::create(nullherz_traits::AudioBackendType::Alsa).enumerate_devices();
+            if !devs.is_empty() { devs } else { vec!["default".to_string()] }
+        };
+
         Self {
             active_settings_tab: SettingsTab::General,
             active_backend: nullherz_traits::AudioBackendType::Alsa,
             active_midi_profile: "default".to_string(),
             config_saved_time: None,
-            audio_devices: vec!["default".to_string()],
+            audio_devices: initial_devices,
             _selected_audio_device: "default".to_string(),
             restore_last_session: false,
             default_view_on_launch: View::Console,
