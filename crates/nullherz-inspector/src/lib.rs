@@ -900,31 +900,42 @@ impl InspectorApp {
                                     BottomDrawer::HorizontalMixer => "GRAPHICAL FX & EQ MIXER DRAWER",
                                     BottomDrawer::Instrument => "SELECTED CHANNEL INSTRUMENT DRAWER",
                                 };
-                                ui.label(egui::RichText::new(title).strong().size(self.theme.type_caption).color(self.theme.accent));
+                                let total_w = ui.available_width();
 
-                                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                    if ui.button(egui_phosphor::regular::X).on_hover_text("Close Drawer").clicked() {
-                                        self.active_bottom_drawer = None;
-                                    }
-                                    let target_view = match drawer {
-                                        BottomDrawer::Mixer => View::Mixer,
-                                        BottomDrawer::HorizontalMixer => View::HorizontalMixer,
-                                        BottomDrawer::Instrument => View::Instrument,
-                                    };
-                                    let is_detached = self.detached_views.contains(&target_view);
-                                    let detach_icon = if is_detached {
-                                        egui_phosphor::regular::ARROWS_IN
-                                    } else {
-                                        egui_phosphor::regular::ARROW_SQUARE_OUT
-                                    };
-                                    let detach_tooltip = if is_detached { "Re-attach Window" } else { "Detach Window" };
-                                    if ui.button(detach_icon).on_hover_text(detach_tooltip).clicked() {
-                                        if is_detached {
-                                            self.detached_views.remove(&target_view);
+                                ui.horizontal(|ui| {
+                                    ui.set_width(total_w);
+
+                                    // Left: Title
+                                    ui.label(egui::RichText::new(title).strong().size(self.theme.type_caption).color(self.theme.accent));
+
+                                    // Center: Close and Detach Action Buttons centered in row
+                                    ui.with_layout(egui::Layout::left_to_right(egui::Align::Center).with_main_align(egui::Align::Center), |ui| {
+                                        let target_view = match drawer {
+                                            BottomDrawer::Mixer => View::Mixer,
+                                            BottomDrawer::HorizontalMixer => View::HorizontalMixer,
+                                            BottomDrawer::Instrument => View::Instrument,
+                                        };
+                                        let is_detached = self.detached_views.contains(&target_view);
+                                        let detach_icon = if is_detached {
+                                            egui_phosphor::regular::ARROWS_IN
                                         } else {
-                                            self.detached_views.insert(target_view);
+                                            egui_phosphor::regular::ARROW_SQUARE_OUT
+                                        };
+                                        let detach_tooltip = if is_detached { "Re-attach Window" } else { "Detach Window" };
+                                        if ui.button(detach_icon).on_hover_text(detach_tooltip).clicked() {
+                                            if is_detached {
+                                                self.detached_views.remove(&target_view);
+                                            } else {
+                                                self.detached_views.insert(target_view);
+                                            }
                                         }
-                                    }
+
+                                        ui.add_space(6.0);
+
+                                        if ui.button(egui_phosphor::regular::X).on_hover_text("Close Drawer").clicked() {
+                                            self.active_bottom_drawer = None;
+                                        }
+                                    });
                                 });
                             });
                         });
@@ -1155,11 +1166,41 @@ impl InspectorApp {
                         ui.label(egui::RichText::new("nullherz Studio").size(10.0).strong().color(self.theme.accent));
 
                         if let Some(t) = telemetry {
-                            ui.separator();
-                            ui.label(format!("BPM: {:.1}", t.bpm));
-                            ui.separator();
-                            ui.label(format!("POS: {:.2}", t.beat_position));
-                            ui.separator();
+                            ui.add_space(4.0);
+
+                            // Helper function for status indicator pills
+                            let render_pill = |ui: &mut egui::Ui, text: &str, bg_color: egui::Color32, stroke_color: egui::Color32, text_color: egui::Color32| {
+                                egui::Frame::none()
+                                    .fill(bg_color)
+                                    .stroke(egui::Stroke::new(1.0, stroke_color))
+                                    .rounding(egui::Rounding::same(self.theme.radius_sm))
+                                    .inner_margin(egui::Margin::symmetric(6.0, 2.0))
+                                    .show(ui, |ui| {
+                                        ui.label(egui::RichText::new(text).size(10.0).strong().color(text_color));
+                                    });
+                            };
+
+                            // BPM Indicator Pill
+                            render_pill(
+                                ui,
+                                &format!("{} {:.1} BPM", egui_phosphor::regular::METRONOME, t.bpm),
+                                self.theme.bg_inset,
+                                self.theme.border_stroke.color,
+                                self.theme.text_primary,
+                            );
+
+                            ui.add_space(2.0);
+
+                            // POS Indicator Pill
+                            render_pill(
+                                ui,
+                                &format!("{} POS {:.2}", egui_phosphor::regular::TIMER, t.beat_position),
+                                self.theme.bg_inset,
+                                self.theme.border_stroke.color,
+                                self.theme.accent,
+                            );
+
+                            ui.add_space(2.0);
 
                             let sr_khz = self.settings.sample_rate / 1000.0;
                             let block_f = self.settings.buffer_size;
@@ -1177,30 +1218,28 @@ impl InspectorApp {
 
                             let rt_warnings = ipc_layer::realtime_environment_warnings();
                             if self.settings.exclusive_performance_mode && rt_warnings.is_empty() {
-                                ui.label(
-                                    egui::RichText::new(format!(
-                                        "⚡ REALTIME {:.0}kHz | {}f ({:.2}ms) | DSP {:.1}%",
-                                        sr_khz, block_f, latency_ms, dsp_load
-                                    ))
-                                    .strong()
-                                    .color(self.theme.success),
+                                render_pill(
+                                    ui,
+                                    &format!("{} REALTIME {:.0}kHz • {}f ({:.2}ms) • DSP {:.1}%", egui_phosphor::regular::LIGHTNING, sr_khz, block_f, latency_ms, dsp_load),
+                                    self.theme.success.linear_multiply(0.12),
+                                    self.theme.success,
+                                    self.theme.success,
                                 );
                             } else if !rt_warnings.is_empty() {
-                                ui.label(
-                                    egui::RichText::new(format!(
-                                        "⚠️ PREEMPTION RISK | {}f ({:.2}ms) | DSP {:.1}%",
-                                        block_f, latency_ms, dsp_load
-                                    ))
-                                    .strong()
-                                    .color(self.theme.danger),
+                                render_pill(
+                                    ui,
+                                    &format!("{} PREEMPTION RISK • {}f ({:.2}ms) • DSP {:.1}%", egui_phosphor::regular::WARNING, block_f, latency_ms, dsp_load),
+                                    self.theme.danger.linear_multiply(0.12),
+                                    self.theme.danger,
+                                    self.theme.danger,
                                 );
                             } else {
-                                ui.label(
-                                    egui::RichText::new(format!(
-                                        "💻 DESKTOP {:.0}kHz | {}f (~{:.1}ms) | DSP {:.1}%",
-                                        sr_khz, block_f, latency_ms, dsp_load
-                                    ))
-                                    .color(self.theme.warning),
+                                render_pill(
+                                    ui,
+                                    &format!("{} DESKTOP {:.0}kHz • {}f (~{:.1}ms) • DSP {:.1}%", egui_phosphor::regular::DESKTOP, sr_khz, block_f, latency_ms, dsp_load),
+                                    self.theme.warning.linear_multiply(0.12),
+                                    self.theme.warning,
+                                    self.theme.warning,
                                 );
                             }
                         }
@@ -1337,7 +1376,11 @@ impl InspectorApp {
             let interval_secs = (self.settings.autosave_interval_mins as f64) * 60.0;
             if current_time - self.settings.last_saved_time >= interval_secs {
                 let _ = self.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::CommitTopology));
-                let ports = "Pioneer DDJ-400,Generic MIDI Keyboard".to_string();
+                let ports = if self.settings.discovered_midi_ports.is_empty() {
+                    "Pioneer DDJ-400,Generic MIDI Keyboard".to_string()
+                } else {
+                    self.settings.discovered_midi_ports.join(",")
+                };
                 let _ = self.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::SetMidiPorts({
                     let mut b = [0u8; 128];
                     let bytes = ports.as_bytes();
@@ -1348,6 +1391,33 @@ impl InspectorApp {
                 self.settings.config_saved_time = Some(current_time);
                 self.settings.autosave_triggered = Some(current_time);
                 self.save_preferences();
+            }
+        }
+    }
+
+    pub fn poll_auto_midi_discovery(&mut self, current_time: f64) {
+        if !self.settings.auto_midi_discovery && current_time > 0.0 {
+            return;
+        }
+
+        if current_time - self.settings.last_midi_scan_time >= 2.0 || current_time == 0.0 {
+            self.settings.last_midi_scan_time = current_time;
+
+            let ports = nullherz_conductor::midi_mapper::MidiMapper::enumerate_midi_devices();
+            if ports != self.settings.discovered_midi_ports || self.settings.discovered_midi_ports.is_empty() {
+                self.settings.discovered_midi_ports = ports.clone();
+
+                let ports_str = if ports.is_empty() {
+                    "Pioneer DDJ-400,Generic MIDI Keyboard".to_string()
+                } else {
+                    ports.join(",")
+                };
+
+                let mut buffer = [0u8; 128];
+                let bytes = ports_str.as_bytes();
+                let len = bytes.len().min(128);
+                buffer[..len].copy_from_slice(&bytes[..len]);
+                let _ = self.command_sender.send(nullherz_traits::Command::Core(nullherz_traits::CoreCommand::SetMidiPorts(buffer)));
             }
         }
     }
@@ -1405,6 +1475,9 @@ impl eframe::App for InspectorApp {
 
         // --- Autosave Background Job ---
         self.handle_autosave(current_time);
+
+        // --- Auto MIDI Device Discovery ---
+        self.poll_auto_midi_discovery(current_time);
 
         let is_focused = ctx.input(|i| i.focused);
         let has_detached = !self.detached_views.is_empty() || self.viz.detached_channel.is_some() || !self.viz.detached_target_screens.is_empty();
@@ -2300,5 +2373,56 @@ mod tests {
         // Send another Command
         cmd_tx.send(Command::Core(nullherz_traits::CoreCommand::SetMasterDeck('D'))).unwrap();
         wait_for_master_deck(&conductor_arc, 'D', std::time::Duration::from_secs(10));
+    }
+
+    #[test]
+    fn test_auto_midi_device_discovery() {
+        let (cmd_tx, _cmd_rx) = mpsc::channel::<Command>();
+        let raw_db = nullherz_dna::LibraryDatabase::load(":memory:").expect("Failed to initialize transient LibraryDatabase");
+        let db_arc = Arc::new(parking_lot::Mutex::new(raw_db));
+
+        let mut app = InspectorApp {
+            graph: GraphJson { nodes: vec![], edges: vec![], node_assignments: Default::default() },
+            command_sender: cmd_tx,
+            last_telemetry: Arc::new(Mutex::new(None)),
+            active_view: View::Settings,
+            detached_views: std::collections::HashSet::new(),
+            mixer: Default::default(),
+            decks: Default::default(),
+            library: Default::default(),
+            store: Default::default(),
+            composer: Default::default(),
+            sampler: Default::default(),
+            editor: Default::default(),
+            broadcast: Default::default(),
+            settings: Default::default(),
+            viz: Default::default(),
+            topo: Default::default(),
+            analyzer: Default::default(),
+            library_db: SharedLibraryDb(db_arc),
+            active_right_tab: None,
+            active_bottom_drawer: None,
+            breeding_view: views::breeder::BreederView::new(),
+            wgpu_renderer: None,
+            waveform_renderer: None,
+            deck_waveform_renderers: [None, None, None, None],
+            discovered_sidecars: vec![],
+            p2p_sync_success_toast: None,
+            export_passport_success_toast: None,
+            export_passport_error_toast: None,
+            rt_warnings: vec![],
+            theme: nullherz_ui_hal::Theme::default(),
+            last_update_time: 0.0,
+            last_telemetry_time: 0.0,
+            _conductor_thread: None,
+        };
+
+        assert!(app.settings.auto_midi_discovery);
+        assert!(app.settings.discovered_midi_ports.is_empty());
+
+        // Poll auto MIDI discovery
+        app.poll_auto_midi_discovery(0.0);
+
+        assert!(!app.settings.discovered_midi_ports.is_empty());
     }
 }
