@@ -1202,6 +1202,34 @@ pub fn pin_thread_to_core(core_id: usize) -> Result<(), String> {
 /// for unprivileged users; audio simply reverts to being swappable, which is what
 /// it was before. Returns the error so the caller can say so once, loudly, rather
 /// than silently pretending the guarantee holds.
+static MEMORY_LOCKED: AtomicBool = AtomicBool::new(false);
+
+/// Returns whether memory locking is active for this process.
+pub fn memory_is_locked() -> bool {
+    if MEMORY_LOCKED.load(Ordering::Acquire) {
+        return true;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(s) = std::fs::read_to_string("/proc/self/status") {
+            for line in s.lines() {
+                if line.starts_with("VmLck:") {
+                    let kib: u64 = line
+                        .split_whitespace()
+                        .nth(1)
+                        .and_then(|v| v.parse().ok())
+                        .unwrap_or(0);
+                    if kib > 0 {
+                        MEMORY_LOCKED.store(true, Ordering::Release);
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    false
+}
+
 pub fn lock_memory() -> Result<(), String> {
     #[cfg(target_os = "linux")]
     {
@@ -1241,6 +1269,7 @@ pub fn lock_memory() -> Result<(), String> {
         if rc != 0 {
             return Err(std::io::Error::last_os_error().to_string());
         }
+        MEMORY_LOCKED.store(true, Ordering::Release);
         Ok(())
     }
     #[cfg(not(target_os = "linux"))]
@@ -1389,7 +1418,7 @@ pub fn realtime_environment_warnings() -> Vec<String> {
     #[cfg(target_os = "linux")]
     if let Ok(swaps) = std::fs::read_to_string("/proc/swaps") {
         // First line is a header; any further line is an active swap area.
-        if swaps.lines().nth(1).is_some() {
+        if swaps.lines().nth(1).is_some() && !memory_is_locked() {
             warnings.push(
                 "Swap is enabled. That is fine ONLY if memory locking succeeded — \
                  otherwise the audio thread's pages can be paged out mid-stream."
