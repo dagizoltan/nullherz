@@ -1,9 +1,10 @@
 use egui::{Ui, Vec2, Sense, RichText, Frame, Margin, Stroke, Color32, Align2, FontId, Rect, pos2};
 use nullherz_ui_hal::Theme;
+use nullherz_ui_hal::widgets::render_knob_sized;
 use crate::InspectorApp;
 
-/// Render a studio icon button card for the operations grid
-fn render_op_icon_button(
+/// Render an ultra-modern studio action icon card for the editor operations grid
+fn render_studio_action_card(
     ui: &mut Ui,
     theme: &Theme,
     icon: &str,
@@ -12,13 +13,13 @@ fn render_op_icon_button(
     accent_color: Color32,
     enabled: bool,
 ) -> egui::Response {
-    let card_width = ((ui.available_width() - 18.0) / 4.0).max(110.0);
-    let card_height = 56.0;
+    let card_width = ((ui.available_width() - 18.0) / 4.0).max(120.0);
+    let card_height = 58.0;
 
     let (rect, response) = ui.allocate_exact_size(Vec2::new(card_width, card_height), Sense::click());
 
     let bg_color = if !enabled {
-        theme.bg_inset.linear_multiply(0.5)
+        theme.bg_inset.linear_multiply(0.4)
     } else if response.is_pointer_button_down_on() {
         accent_color.linear_multiply(0.25)
     } else if response.hovered() {
@@ -33,8 +34,9 @@ fn render_op_icon_button(
         Stroke::new(1.0, theme.border_stroke.color)
     };
 
-    ui.painter().rect_filled(rect, theme.radius_sm, bg_color);
-    ui.painter().rect_stroke(rect, theme.radius_sm, border_stroke);
+    // Card background & rounded border
+    ui.painter().rect_filled(rect, theme.radius_md, bg_color);
+    ui.painter().rect_stroke(rect, theme.radius_md, border_stroke);
 
     let icon_color = if enabled { accent_color } else { theme.text_secondary.linear_multiply(0.4) };
     let text_color = if enabled { theme.text_primary } else { theme.text_secondary.linear_multiply(0.4) };
@@ -43,8 +45,23 @@ fn render_op_icon_button(
     let mut child_ui = ui.child_ui(content_rect, egui::Layout::left_to_right(egui::Align::Center), None);
 
     child_ui.horizontal(|ui| {
-        ui.label(RichText::new(icon).size(20.0).color(icon_color));
-        ui.add_space(4.0);
+        // Icon Badge Container
+        let icon_badge_size = Vec2::new(32.0, 32.0);
+        let (badge_rect, _) = ui.allocate_exact_size(icon_badge_size, Sense::hover());
+        let badge_bg = if enabled { accent_color.linear_multiply(0.12) } else { theme.bg_inset };
+        ui.painter().rect_filled(badge_rect, theme.radius_sm, badge_bg);
+        ui.painter().rect_stroke(badge_rect, theme.radius_sm, Stroke::new(1.0, icon_color.linear_multiply(0.4)));
+        ui.painter().text(
+            badge_rect.center(),
+            Align2::CENTER_CENTER,
+            icon,
+            FontId::proportional(16.0),
+            icon_color,
+        );
+
+        ui.add_space(6.0);
+
+        // Labels
         ui.vertical(|ui| {
             ui.label(RichText::new(title).strong().size(theme.type_caption).color(text_color));
             ui.label(RichText::new(subtitle).size(8.5).color(theme.text_secondary));
@@ -559,7 +576,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
 
             ui.add_space(theme.space_sm);
 
-            // --- 6. HIGH-DENSITY STUDIO OPERATIONS ICON GRID & PARAMETER BARS ---
+            // --- 6. ULTRA-MODERN STUDIO OPERATIONS TOOLKIT & ROTARY DSP PANEL ---
             Frame::none()
                 .fill(theme.bg_surface)
                 .rounding(theme.radius_md)
@@ -567,20 +584,31 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                 .inner_margin(Margin::same(theme.space_md))
                 .show(ui, |ui| {
                     ui.vertical(|ui| {
+                        // Section Header
                         ui.horizontal(|ui| {
-                            ui.label(RichText::new(format!("{} AUDIO OPERATIONS & DSP TOOLKIT", egui_phosphor::regular::SLIDERS_HORIZONTAL)).strong().size(theme.type_body).color(theme.accent));
+                            ui.label(RichText::new(format!("{} STUDIO OPERATIONS & DSP TOOLKIT", egui_phosphor::regular::SLIDERS_HORIZONTAL)).strong().size(theme.type_body).color(theme.accent));
+                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                Frame::none()
+                                    .fill(theme.bg_inset)
+                                    .rounding(theme.radius_sm)
+                                    .stroke(Stroke::new(1.0, theme.border_stroke.color))
+                                    .inner_margin(Margin::symmetric(6.0, 2.0))
+                                    .show(ui, |ui| {
+                                        ui.label(RichText::new("32-BIT FLOAT PRECISION").size(9.0).strong().color(theme.success));
+                                    });
+                            });
                         });
 
-                        ui.add_space(theme.space_xs);
+                        ui.add_space(theme.space_sm);
 
                         let has_selection = app.editor.editor_selection.is_some();
 
-                        // Row 1: Primary Sample Actions Icon Grid
+                        // Row 1: Primary Studio Action Cards Grid
                         ui.horizontal(|ui| {
                             ui.spacing_mut().item_spacing.x = 6.0;
 
-                            // 1. Crop
-                            let crop_res = render_op_icon_button(
+                            // 1. Crop Region
+                            let crop_res = render_studio_action_card(
                                 ui,
                                 &theme,
                                 egui_phosphor::regular::CROP,
@@ -602,7 +630,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                             }
 
                             // 2. Peak Normalize
-                            let norm_res = render_op_icon_button(
+                            let norm_res = render_studio_action_card(
                                 ui,
                                 &theme,
                                 egui_phosphor::regular::LIGHTNING,
@@ -616,7 +644,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                             }
 
                             // 3. Chop Transients
-                            let chop_res = render_op_icon_button(
+                            let chop_res = render_studio_action_card(
                                 ui,
                                 &theme,
                                 egui_phosphor::regular::KNIFE,
@@ -630,7 +658,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                             }
 
                             // 4. Time Stretch
-                            let stretch_res = render_op_icon_button(
+                            let stretch_res = render_studio_action_card(
                                 ui,
                                 &theme,
                                 egui_phosphor::regular::WAVEFORM,
@@ -649,12 +677,12 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
 
                         ui.add_space(6.0);
 
-                        // Row 2: Secondary DSP Actions Icon Grid
+                        // Row 2: Secondary Studio Action Cards Grid
                         ui.horizontal(|ui| {
                             ui.spacing_mut().item_spacing.x = 6.0;
 
                             // 5. Reverse Sample
-                            let rev_res = render_op_icon_button(
+                            let rev_res = render_studio_action_card(
                                 ui,
                                 &theme,
                                 egui_phosphor::regular::ARROWS_LEFT_RIGHT,
@@ -668,7 +696,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                             }
 
                             // 6. Re-Analyze DNA
-                            let dna_res = render_op_icon_button(
+                            let dna_res = render_studio_action_card(
                                 ui,
                                 &theme,
                                 egui_phosphor::regular::DNA,
@@ -682,7 +710,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                             }
 
                             // 7. Fade In / Out
-                            let fade_res = render_op_icon_button(
+                            let fade_res = render_studio_action_card(
                                 ui,
                                 &theme,
                                 egui_phosphor::regular::FLOPPY_DISK,
@@ -696,7 +724,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                             }
 
                             // 8. Export Slices
-                            let exp_res = render_op_icon_button(
+                            let exp_res = render_studio_action_card(
                                 ui,
                                 &theme,
                                 egui_phosphor::regular::EXPORT,
@@ -712,35 +740,55 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
 
                         ui.add_space(theme.space_sm);
 
-                        // Row 3: Parameter Sliders Bar
+                        // Row 3: Rotary DSP Controls & Parameter Badges Bar
                         Frame::none()
                             .fill(theme.bg_inset)
-                            .rounding(theme.radius_sm)
+                            .rounding(theme.radius_md)
                             .stroke(Stroke::new(1.0, theme.border_stroke.color))
                             .inner_margin(Margin::same(theme.space_sm))
                             .show(ui, |ui| {
                                 ui.horizontal(|ui| {
-                                    // Gain Trim
-                                    ui.label(RichText::new("Gain Trim:").size(theme.type_caption).strong());
-                                    ui.add(egui::Slider::new(&mut app.editor.editor_gain_trim, 0.0..=2.0).show_value(true));
+                                    ui.spacing_mut().item_spacing.x = 24.0;
 
-                                    ui.add_space(theme.space_md);
+                                    // Knob 1: Gain Trim
+                                    ui.horizontal(|ui| {
+                                        render_knob_sized(ui, &mut app.editor.editor_gain_trim, 0.0..=2.0, "TRIM", theme.accent, 24.0);
+                                        ui.add_space(2.0);
+                                        ui.vertical(|ui| {
+                                            ui.label(RichText::new("GAIN TRIM").strong().size(9.0).color(theme.accent));
+                                            ui.label(RichText::new(format!("{:.2}x", app.editor.editor_gain_trim)).size(10.0).color(theme.text_primary));
+                                        });
+                                    });
 
-                                    // Transient Sensitivity
-                                    ui.label(RichText::new("Sensitivity:").size(theme.type_caption).strong());
-                                    ui.add(egui::Slider::new(&mut app.editor.editor_transient_sensitivity, 0.0..=1.0).show_value(true));
+                                    // Knob 2: Transient Sensitivity
+                                    ui.horizontal(|ui| {
+                                        render_knob_sized(ui, &mut app.editor.editor_transient_sensitivity, 0.0..=1.0, "SENS", theme.success, 24.0);
+                                        ui.add_space(2.0);
+                                        ui.vertical(|ui| {
+                                            ui.label(RichText::new("TRANSIENT SENS").strong().size(9.0).color(theme.success));
+                                            ui.label(RichText::new(format!("{:.0}%", app.editor.editor_transient_sensitivity * 100.0)).size(10.0).color(theme.text_primary));
+                                        });
+                                    });
 
-                                    ui.add_space(theme.space_md);
+                                    // Knob 3: Pitch Shift
+                                    ui.horizontal(|ui| {
+                                        render_knob_sized(ui, &mut app.editor.editor_pitch_shift_semitones, -12.0..=12.0, "PITCH", theme.warning, 24.0);
+                                        ui.add_space(2.0);
+                                        ui.vertical(|ui| {
+                                            ui.label(RichText::new("PITCH SHIFT").strong().size(9.0).color(theme.warning));
+                                            ui.label(RichText::new(format!("{:+2.0} st", app.editor.editor_pitch_shift_semitones)).size(10.0).color(theme.text_primary));
+                                        });
+                                    });
 
-                                    // Pitch Shift
-                                    ui.label(RichText::new("Pitch (st):").size(theme.type_caption).strong());
-                                    ui.add(egui::Slider::new(&mut app.editor.editor_pitch_shift_semitones, -12.0..=12.0).show_value(true));
-
-                                    ui.add_space(theme.space_md);
-
-                                    // Stretch Ratio
-                                    ui.label(RichText::new("Stretch Ratio:").size(theme.type_caption).strong());
-                                    ui.add(egui::Slider::new(&mut app.editor.editor_time_stretch_ratio, 0.5..=2.0).show_value(true));
+                                    // Knob 4: Stretch Ratio
+                                    ui.horizontal(|ui| {
+                                        render_knob_sized(ui, &mut app.editor.editor_time_stretch_ratio, 0.5..=2.0, "TIME", theme.accent, 24.0);
+                                        ui.add_space(2.0);
+                                        ui.vertical(|ui| {
+                                            ui.label(RichText::new("STRETCH RATIO").strong().size(9.0).color(theme.accent));
+                                            ui.label(RichText::new(format!("{:.2}x", app.editor.editor_time_stretch_ratio)).size(10.0).color(theme.text_primary));
+                                        });
+                                    });
                                 });
                             });
                     });
