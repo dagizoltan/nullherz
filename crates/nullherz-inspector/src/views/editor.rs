@@ -1,5 +1,58 @@
 use egui::{Ui, Vec2, Sense, RichText, Frame, Margin, Stroke, Color32, Align2, FontId, Rect, pos2};
+use nullherz_ui_hal::Theme;
 use crate::InspectorApp;
+
+/// Render a studio icon button card for the operations grid
+fn render_op_icon_button(
+    ui: &mut Ui,
+    theme: &Theme,
+    icon: &str,
+    title: &str,
+    subtitle: &str,
+    accent_color: Color32,
+    enabled: bool,
+) -> egui::Response {
+    let card_width = ((ui.available_width() - 18.0) / 4.0).max(110.0);
+    let card_height = 56.0;
+
+    let (rect, response) = ui.allocate_exact_size(Vec2::new(card_width, card_height), Sense::click());
+
+    let bg_color = if !enabled {
+        theme.bg_inset.linear_multiply(0.5)
+    } else if response.is_pointer_button_down_on() {
+        accent_color.linear_multiply(0.25)
+    } else if response.hovered() {
+        theme.bg_surface_raised
+    } else {
+        theme.bg_inset
+    };
+
+    let border_stroke = if response.hovered() && enabled {
+        Stroke::new(1.5, accent_color)
+    } else {
+        Stroke::new(1.0, theme.border_stroke.color)
+    };
+
+    ui.painter().rect_filled(rect, theme.radius_sm, bg_color);
+    ui.painter().rect_stroke(rect, theme.radius_sm, border_stroke);
+
+    let icon_color = if enabled { accent_color } else { theme.text_secondary.linear_multiply(0.4) };
+    let text_color = if enabled { theme.text_primary } else { theme.text_secondary.linear_multiply(0.4) };
+
+    let content_rect = rect.shrink(6.0);
+    let mut child_ui = ui.child_ui(content_rect, egui::Layout::left_to_right(egui::Align::Center), None);
+
+    child_ui.horizontal(|ui| {
+        ui.label(RichText::new(icon).size(20.0).color(icon_color));
+        ui.add_space(4.0);
+        ui.vertical(|ui| {
+            ui.label(RichText::new(title).strong().size(theme.type_caption).color(text_color));
+            ui.label(RichText::new(subtitle).size(8.5).color(theme.text_secondary));
+        });
+    });
+
+    response
+}
 
 /// Render the Studio Audio Editor page
 pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
@@ -504,22 +557,40 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                     });
                 });
 
-            ui.add_space(theme.space_md);
+            ui.add_space(theme.space_sm);
 
-            // --- 6. ORGANIZED STUDIO DSP TOOLCARDS (4 PANELS) ---
-            ui.columns(4, |cols| {
-                // Card 1: Sample Operations & Editing
-                cols[0].group(|ui| {
+            // --- 6. HIGH-DENSITY STUDIO OPERATIONS ICON GRID & PARAMETER BARS ---
+            Frame::none()
+                .fill(theme.bg_surface)
+                .rounding(theme.radius_md)
+                .stroke(Stroke::new(1.0, theme.border))
+                .inner_margin(Margin::same(theme.space_md))
+                .show(ui, |ui| {
                     ui.vertical(|ui| {
                         ui.horizontal(|ui| {
-                            ui.label(RichText::new(format!("{} SAMPLE EDITING", egui_phosphor::regular::SCISSORS)).strong().size(theme.type_body).color(theme.accent));
+                            ui.label(RichText::new(format!("{} AUDIO OPERATIONS & DSP TOOLKIT", egui_phosphor::regular::SLIDERS_HORIZONTAL)).strong().size(theme.type_body).color(theme.accent));
                         });
+
                         ui.add_space(theme.space_xs);
 
                         let has_selection = app.editor.editor_selection.is_some();
-                        ui.add_enabled_ui(has_selection, |ui| {
-                            if ui.button(RichText::new(format!("{} CROP SELECTION", egui_phosphor::regular::CROP)).size(theme.type_label)).clicked()
-                                && let Some((s, e)) = app.editor.editor_selection {
+
+                        // Row 1: Primary Sample Actions Icon Grid
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 6.0;
+
+                            // 1. Crop
+                            let crop_res = render_op_icon_button(
+                                ui,
+                                &theme,
+                                egui_phosphor::regular::CROP,
+                                "CROP REGION",
+                                "Cut to selection",
+                                theme.accent,
+                                has_selection,
+                            );
+                            if crop_res.clicked() && has_selection {
+                                if let Some((s, e)) = app.editor.editor_selection {
                                     let (start, end) = if s < e { (s, e) } else { (e, s) };
                                     let total_samples = track.metadata.total_samples as f32;
                                     let _ = app.command_sender.send(nullherz_traits::Command::Resource(nullherz_traits::ResourceCommand::Crop {
@@ -528,102 +599,152 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                                         end_samples: (end * total_samples) as u64,
                                     }));
                                 }
-                        }).response.on_disabled_hover_text("Select a region on waveform first");
+                            }
 
-                        ui.add_space(3.0);
-                        if ui.button(RichText::new(format!("{} NORMALIZE PEAK (0 dB)", egui_phosphor::regular::LIGHTNING)).size(theme.type_label)).clicked() {
-                            let _ = app.command_sender.send(nullherz_traits::Command::Resource(nullherz_traits::ResourceCommand::Normalize { sample_id: track.id }));
-                        }
+                            // 2. Peak Normalize
+                            let norm_res = render_op_icon_button(
+                                ui,
+                                &theme,
+                                egui_phosphor::regular::LIGHTNING,
+                                "NORMALIZE",
+                                "0 dB Peak Gain",
+                                theme.accent,
+                                true,
+                            );
+                            if norm_res.clicked() {
+                                let _ = app.command_sender.send(nullherz_traits::Command::Resource(nullherz_traits::ResourceCommand::Normalize { sample_id: track.id }));
+                            }
 
-                        ui.add_space(3.0);
-                        ui.horizontal(|ui| {
-                            ui.label(RichText::new("Gain Trim:").size(theme.type_caption));
-                            ui.add(egui::Slider::new(&mut app.editor.editor_gain_trim, 0.0..=2.0).text(""));
+                            // 3. Chop Transients
+                            let chop_res = render_op_icon_button(
+                                ui,
+                                &theme,
+                                egui_phosphor::regular::KNIFE,
+                                "CHOP TRANSIENTS",
+                                &format!("{} Marks", track.metadata.transients.len()),
+                                theme.success,
+                                true,
+                            );
+                            if chop_res.clicked() {
+                                let _ = app.command_sender.send(nullherz_traits::Command::Resource(nullherz_traits::ResourceCommand::ChopByTransient { sample_id: track.id }));
+                            }
+
+                            // 4. Time Stretch
+                            let stretch_res = render_op_icon_button(
+                                ui,
+                                &theme,
+                                egui_phosphor::regular::WAVEFORM,
+                                "TIME STRETCH",
+                                &format!("{:.2}x Ratio", app.editor.editor_time_stretch_ratio),
+                                theme.warning,
+                                true,
+                            );
+                            if stretch_res.clicked() {
+                                let _ = app.command_sender.send(nullherz_traits::Command::Resource(nullherz_traits::ResourceCommand::TimeStretch {
+                                    sample_id: track.id,
+                                    ratio: app.editor.editor_time_stretch_ratio,
+                                }));
+                            }
                         });
 
-                        ui.add_space(3.0);
-                        if ui.button(RichText::new(format!("{} REVERSE SAMPLE", egui_phosphor::regular::ARROWS_LEFT_RIGHT)).size(theme.type_label)).clicked() {
-                            // Reverse action placeholder
-                        }
+                        ui.add_space(6.0);
+
+                        // Row 2: Secondary DSP Actions Icon Grid
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing.x = 6.0;
+
+                            // 5. Reverse Sample
+                            let rev_res = render_op_icon_button(
+                                ui,
+                                &theme,
+                                egui_phosphor::regular::ARROWS_LEFT_RIGHT,
+                                "REVERSE",
+                                "Invert Buffer",
+                                theme.accent,
+                                true,
+                            );
+                            if rev_res.clicked() {
+                                // Reverse action placeholder
+                            }
+
+                            // 6. Re-Analyze DNA
+                            let dna_res = render_op_icon_button(
+                                ui,
+                                &theme,
+                                egui_phosphor::regular::DNA,
+                                "RE-ANALYZE DNA",
+                                "SoundDNA Passport",
+                                theme.accent,
+                                true,
+                            );
+                            if dna_res.clicked() {
+                                let _ = app.command_sender.send(nullherz_traits::Command::Resource(nullherz_traits::ResourceCommand::ReAnalyze { sample_id: track.id }));
+                            }
+
+                            // 7. Fade In / Out
+                            let fade_res = render_op_icon_button(
+                                ui,
+                                &theme,
+                                egui_phosphor::regular::FLOPPY_DISK,
+                                "FADE REGION",
+                                "Smooth Envelopes",
+                                theme.success,
+                                has_selection,
+                            );
+                            if fade_res.clicked() {
+                                // Fade region placeholder
+                            }
+
+                            // 8. Export Slices
+                            let exp_res = render_op_icon_button(
+                                ui,
+                                &theme,
+                                egui_phosphor::regular::EXPORT,
+                                "EXPORT SLICES",
+                                "Save to Library",
+                                theme.warning,
+                                true,
+                            );
+                            if exp_res.clicked() {
+                                // Export slice action
+                            }
+                        });
+
+                        ui.add_space(theme.space_sm);
+
+                        // Row 3: Parameter Sliders Bar
+                        Frame::none()
+                            .fill(theme.bg_inset)
+                            .rounding(theme.radius_sm)
+                            .stroke(Stroke::new(1.0, theme.border_stroke.color))
+                            .inner_margin(Margin::same(theme.space_sm))
+                            .show(ui, |ui| {
+                                ui.horizontal(|ui| {
+                                    // Gain Trim
+                                    ui.label(RichText::new("Gain Trim:").size(theme.type_caption).strong());
+                                    ui.add(egui::Slider::new(&mut app.editor.editor_gain_trim, 0.0..=2.0).show_value(true));
+
+                                    ui.add_space(theme.space_md);
+
+                                    // Transient Sensitivity
+                                    ui.label(RichText::new("Sensitivity:").size(theme.type_caption).strong());
+                                    ui.add(egui::Slider::new(&mut app.editor.editor_transient_sensitivity, 0.0..=1.0).show_value(true));
+
+                                    ui.add_space(theme.space_md);
+
+                                    // Pitch Shift
+                                    ui.label(RichText::new("Pitch (st):").size(theme.type_caption).strong());
+                                    ui.add(egui::Slider::new(&mut app.editor.editor_pitch_shift_semitones, -12.0..=12.0).show_value(true));
+
+                                    ui.add_space(theme.space_md);
+
+                                    // Stretch Ratio
+                                    ui.label(RichText::new("Stretch Ratio:").size(theme.type_caption).strong());
+                                    ui.add(egui::Slider::new(&mut app.editor.editor_time_stretch_ratio, 0.5..=2.0).show_value(true));
+                                });
+                            });
                     });
                 });
-
-                // Card 2: Transient, Beat Grid & Slicing
-                cols[1].group(|ui| {
-                    ui.vertical(|ui| {
-                        ui.horizontal(|ui| {
-                            ui.label(RichText::new(format!("{} TRANSIENT & SLICING", egui_phosphor::regular::KNIFE)).strong().size(theme.type_body).color(theme.success));
-                        });
-                        ui.add_space(theme.space_xs);
-
-                        if ui.button(RichText::new(format!("{} CHOP TRANSIENTS ({})", egui_phosphor::regular::KNIFE, track.metadata.transients.len())).size(theme.type_label)).clicked() {
-                            let _ = app.command_sender.send(nullherz_traits::Command::Resource(nullherz_traits::ResourceCommand::ChopByTransient { sample_id: track.id }));
-                        }
-
-                        ui.add_space(3.0);
-                        ui.horizontal(|ui| {
-                            ui.label(RichText::new("Sensitivity:").size(theme.type_caption));
-                            ui.add(egui::Slider::new(&mut app.editor.editor_transient_sensitivity, 0.0..=1.0).text(""));
-                        });
-
-                        ui.add_space(3.0);
-                        ui.label(RichText::new(format!("Detected Transients: {}", track.metadata.transients.len())).size(theme.type_caption));
-                        ui.label(RichText::new(format!("Root Key: {:?}", track.metadata.root_key)).size(theme.type_caption));
-                    });
-                });
-
-                // Card 3: Time Stretch & Pitch DSP
-                cols[2].group(|ui| {
-                    ui.vertical(|ui| {
-                        ui.horizontal(|ui| {
-                            ui.label(RichText::new(format!("{} PITCH & TIME DSP", egui_phosphor::regular::CLOCK_COUNTER_CLOCKWISE)).strong().size(theme.type_body).color(theme.warning));
-                        });
-                        ui.add_space(theme.space_xs);
-
-                        ui.horizontal(|ui| {
-                            ui.label(RichText::new("Pitch (st):").size(theme.type_caption));
-                            ui.add(egui::Slider::new(&mut app.editor.editor_pitch_shift_semitones, -12.0..=12.0).text(""));
-                        });
-
-                        ui.add_space(3.0);
-                        ui.horizontal(|ui| {
-                            ui.label(RichText::new("Stretch Ratio:").size(theme.type_caption));
-                            ui.add(egui::Slider::new(&mut app.editor.editor_time_stretch_ratio, 0.5..=2.0).text(""));
-                        });
-
-                        ui.add_space(3.0);
-                        if ui.button(RichText::new(format!("{} APPLY TIME STRETCH", egui_phosphor::regular::WAVEFORM)).size(theme.type_label)).clicked() {
-                            let _ = app.command_sender.send(nullherz_traits::Command::Resource(nullherz_traits::ResourceCommand::TimeStretch {
-                                sample_id: track.id,
-                                ratio: app.editor.editor_time_stretch_ratio,
-                            }));
-                        }
-                    });
-                });
-
-                // Card 4: SoundDNA & Library Export
-                cols[3].group(|ui| {
-                    ui.vertical(|ui| {
-                        ui.horizontal(|ui| {
-                            ui.label(RichText::new(format!("{} SOUNDDNA & EXPORT", egui_phosphor::regular::DNA)).strong().size(theme.type_body).color(theme.accent));
-                        });
-                        ui.add_space(theme.space_xs);
-
-                        if ui.button(RichText::new(format!("{} RE-ANALYZE SOUNDDNA", egui_phosphor::regular::DNA)).size(theme.type_label)).clicked() {
-                            let _ = app.command_sender.send(nullherz_traits::Command::Resource(nullherz_traits::ResourceCommand::ReAnalyze { sample_id: track.id }));
-                        }
-
-                        ui.add_space(3.0);
-                        ui.label(RichText::new(format!("Artist: {}", track.artist)).size(theme.type_caption));
-                        ui.label(RichText::new(format!("BPM: {:.2}", track.metadata.bpm)).size(theme.type_caption));
-
-                        ui.add_space(3.0);
-                        if ui.button(RichText::new(format!("{} EXPORT TO SAMPLES", egui_phosphor::regular::EXPORT)).size(theme.type_label)).clicked() {
-                            // Export slice action
-                        }
-                    });
-                });
-            });
 
         } else {
             ui.label(RichText::new("Track not found in library.").color(theme.danger).size(theme.type_body));
