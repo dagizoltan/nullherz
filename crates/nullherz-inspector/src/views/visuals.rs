@@ -1410,14 +1410,14 @@ pub fn render_visuals_view(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry:
         ui.add_space(theme.space_md);
     }
 
-    if let Some(idx_to_remove) = screen_to_remove {
-        if idx_to_remove < app.viz.target_screens.len() {
-            let removed_id = app.viz.target_screens[idx_to_remove].id.clone();
-            app.viz.target_screens.remove(idx_to_remove);
-            app.viz.detached_target_screens.remove(&removed_id);
-            if app.viz.active_target_screen_idx >= app.viz.target_screens.len() {
-                app.viz.active_target_screen_idx = app.viz.target_screens.len().saturating_sub(1);
-            }
+    if let Some(idx_to_remove) = screen_to_remove
+        && idx_to_remove < app.viz.target_screens.len()
+    {
+        let removed_id = app.viz.target_screens[idx_to_remove].id.clone();
+        app.viz.target_screens.remove(idx_to_remove);
+        app.viz.detached_target_screens.remove(&removed_id);
+        if app.viz.active_target_screen_idx >= app.viz.target_screens.len() {
+            app.viz.active_target_screen_idx = app.viz.target_screens.len().saturating_sub(1);
         }
     }
 
