@@ -1,433 +1,145 @@
-use egui::{Ui, Frame, Vec2, Sense, RichText, Rounding, Stroke, Margin};
-use crate::InspectorApp;
-use crate::state::ChannelInputSource;
-use nullherz_ui_hal::widgets;
+use egui::{Ui, Frame, Vec2, Sense, RichText, Stroke, Margin, Color32};
+use nullherz_ui_hal::widgets::{self, render_knob_sized};
 use audio_core::Telemetry;
-use nullherz_traits::{Command, CoreCommand, MidiEvent, TopologyCommand, MixerCommand};
-use nullherz_dna::SampleDrumKitPreset;
+use nullherz_traits::{Command, CoreCommand, MidiEvent, MixerCommand};
+use crate::InspectorApp;
 
-pub fn render_instrument_drawer(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>) {
-    let focus = app.mixer.focused_detail_channel;
-    let is_drum = (4..20).contains(&focus) || app.mixer.channel_input_sources[focus % 16] == ChannelInputSource::DrumMachine;
-
+pub fn render_instrument_drawer(app: &mut InspectorApp, ui: &mut Ui, _telemetry: &Option<Telemetry>) {
     Frame::none()
         .fill(app.theme.bg_surface)
         .rounding(app.theme.radius_md)
         .inner_margin(app.theme.space_md)
         .show(ui, |ui| {
-            if is_drum {
-                ui.horizontal(|ui| {
-                    ui.heading(RichText::new(format!("SELECTED CHANNEL {:02} INSTRUMENT: DRUM MACHINE", focus + 1)).strong().size(app.theme.type_body));
-                });
-                ui.add_space(4.0);
-                render(app, ui, telemetry);
-            } else {
-                ui.horizontal(|ui| {
-                    ui.heading(RichText::new(format!("SELECTED CHANNEL {:02} INSTRUMENT: ANALOG SYNTHESIZER", focus + 1)).strong().size(app.theme.type_body));
-                });
-                ui.add_space(4.0);
-                crate::views::channel_detail::render(app, ui, telemetry);
-            }
+            ui.horizontal(|ui| {
+                ui.heading(RichText::new("PRODUCTION STUDIO SAMPLER & CAPTURE ENGINE").strong().size(app.theme.type_body));
+            });
+            ui.add_space(4.0);
+            render(app, ui, _telemetry);
         });
 }
 
-const SUBCHANNEL_LABELS: [&str; 16] = [
-    "KICK", "SNARE", "HH-CL", "HH-OP",
-    "TOM-LO", "TOM-MID", "TOM-HI", "PERC 1",
-    "PERC 2", "CLAP", "RIDE", "CRASH",
-    "FX 1", "FX 2", "AUX 1", "AUX 2",
-];
+pub fn render(app: &mut InspectorApp, ui: &mut Ui, _telemetry: &Option<Telemetry>) {
+    let theme = app.theme;
+    let current_time = ui.input(|i| i.time);
 
-#[allow(clippy::collapsible_if)]
-pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>) {
-    ui.horizontal(|ui| {
-        ui.heading("Production Sampler & 16-Channel Drum Submixer");
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if app.sampler.sampler_is_recording {
-                let time = ui.input(|i| i.time);
-                let alpha = ((time * 3.0).sin() * 0.5 + 0.5) as f32;
-                ui.label(RichText::new("● RECORDING").color(app.theme.danger.gamma_multiply(alpha)).strong());
-            }
-        });
-    });
-    ui.add_space(6.0);
-
-    // Waveform Preview Area
+    // --- Header & Recording Status Banner ---
     Frame::none()
-        .fill(app.theme.bg_dark)
-        .rounding(app.theme.radius_md)
-        .stroke(app.theme.border_stroke)
-        .inner_margin(app.theme.space_md)
-        .show(ui, |ui| {
-            let (rect, _response) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 100.0), Sense::hover());
-
-            if let (Some(wgpu_mtx), Some(wf_mtx)) = (&app.wgpu_renderer, &app.waveform_renderer) {
-                 let _wgpu = wgpu_mtx.lock();
-                 let mut wf = wf_mtx.lock();
-
-                 if let Some(track_id) = app.sampler.source_track {
-                     if let Some(track) = app.get_cached_track(track_id) {
-                         wf.update_from_mip_waveform(&_wgpu.queue, &track.metadata.mip_waveform, app.sampler.sampler_waveform_zoom, rect.width() as u32, app.theme.accent.to_array().map(|v| v as f32 / 255.0));
-                     }
-                 }
-
-                 let color = app.theme.accent.to_array().map(|v| v as f32 / 255.0);
-                 wf.update_globals(&_wgpu.queue, 0.0, app.sampler.sampler_waveform_zoom, false, app.mixer.waveform_styles[0], color);
-
-                 nullherz_ui_hal::render::waveform_renderer::ui_paint_waveform(ui, rect, wf_mtx.clone());
-            }
-        });
-
-    ui.add_space(4.0);
-    ui.horizontal(|ui| {
-        ui.label("Zoom:");
-        ui.add(egui::Slider::new(&mut app.sampler.sampler_waveform_zoom, 1.0..=32.0).logarithmic(true).show_value(false));
-        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-             if ui.button("RESET VIEW").clicked() { app.sampler.sampler_waveform_zoom = 1.0; }
-        });
-    });
-
-    ui.add_space(8.0);
-
-    // 16-SUBCHANNEL DRUM SUBMIXER STRIPS & ANALOG DRUM MACHINE CONTROLS
-    Frame::none()
-        .fill(app.theme.bg_surface)
-        .rounding(app.theme.radius_md)
-        .stroke(app.theme.border_stroke)
-        .inner_margin(app.theme.space_sm)
+        .fill(theme.bg_surface)
+        .rounding(theme.radius_md)
+        .stroke(Stroke::new(1.0, theme.border))
+        .inner_margin(Margin::symmetric(theme.space_md, theme.space_xs))
         .show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.heading(RichText::new("ANALOG DRUM MACHINE & INLINE SUBMIXER").strong().size(app.theme.type_body));
-                ui.add_space(10.0);
+                ui.label(RichText::new(egui_phosphor::regular::MICROPHONE_STAGE).size(16.0).color(theme.accent));
+                ui.add_space(4.0);
+                ui.label(RichText::new("STUDIO SAMPLER & ZERO-LATENCY CAPTURE").strong().size(theme.type_body).color(theme.text_primary));
 
-                // Engine Selector
-                ui.label(RichText::new("ACTIVE ENGINE:").strong().size(app.theme.type_caption).color(app.theme.text_secondary));
-
-                if ui.add(egui::Button::new(RichText::new("SAMPLE ENGINE").size(app.theme.type_caption).strong()).fill(app.theme.accent.linear_multiply(0.3))).clicked() {
-                    if let Some(dm_node) = app.get_node_id("drum_machine_node") {
-                        let _ = app.command_sender.send(Command::Topology(TopologyCommand::SwapProcessor {
-                            node_idx: dm_node,
-                            processor_type_id: nullherz_traits::ProcessorTypeId::SAMPLE_DRUM_MACHINE,
-                        }));
-                    }
-                }
-                if ui.add(egui::Button::new(RichText::new("ANALOG SYNTH").size(app.theme.type_caption).strong()).fill(app.theme.warning.linear_multiply(0.3))).clicked() {
-                    if let Some(dm_node) = app.get_node_id("drum_machine_node") {
-                        let _ = app.command_sender.send(Command::Topology(TopologyCommand::SwapProcessor {
-                            node_idx: dm_node,
-                            processor_type_id: nullherz_traits::ProcessorTypeId::SYNTH_DRUM_MACHINE,
-                        }));
-                    }
-                }
-                if ui.add(egui::Button::new(RichText::new("CORTICAL NEURAL").size(app.theme.type_caption).strong()).fill(app.theme.success.linear_multiply(0.3))).clicked() {
-                    if let Some(dm_node) = app.get_node_id("drum_machine_node") {
-                        let _ = app.command_sender.send(Command::Topology(TopologyCommand::SwapProcessor {
-                            node_idx: dm_node,
-                            processor_type_id: nullherz_traits::ProcessorTypeId::NEURAL_DRUM_MACHINE,
-                        }));
-                    }
-                }
-
-                ui.add_space(12.0);
-
-                // Kit Preset Hot-loading
-                ui.label(RichText::new("PRESETS:").strong().size(app.theme.type_caption).color(app.theme.text_secondary));
-                if ui.button(RichText::new("LOAD DEFAULT KITS").size(app.theme.type_caption)).clicked() {
-                    let preset = SampleDrumKitPreset::default();
-                    for pad in &preset.pads {
-                        let idx = pad.pad_index as usize;
-                        if idx < 16 {
-                            if let Some(ref path) = pad.sample_path {
-                                app.composer.track_targets[idx] = path.to_string();
-                            }
-                        }
-                    }
-                }
-            });
-
-            ui.add_space(6.0);
-
-            // 16 Compact Subchannel Strips with Trigger, Rotary Knobs, Dropdown, Mute/Solo, Fader & VU Meter
-            egui::ScrollArea::horizontal().show(ui, |ui| {
-                ui.horizontal(|ui| {
-                    ui.spacing_mut().item_spacing.x = 4.0;
-
-                    for sub_idx in 0..16 {
-                        let note = (36 + sub_idx) as u8;
-                        let track_color = crate::InspectorApp::deck_color(&app.theme, sub_idx % 4);
-                        let label = SUBCHANNEL_LABELS[sub_idx];
-
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if app.sampler.sampler_is_recording {
+                        let alpha = ((current_time * 4.0).sin() * 0.5 + 0.5) as f32;
                         Frame::none()
-                            .fill(app.theme.bg_dark)
-                            .rounding(Rounding::same(app.theme.radius_sm))
-                            .stroke(Stroke::new(1.0_f32, track_color))
-                            .inner_margin(Margin::same(4.0))
+                            .fill(theme.danger.linear_multiply(0.2))
+                            .rounding(theme.radius_sm)
+                            .stroke(Stroke::new(1.0, theme.danger))
+                            .inner_margin(Margin::symmetric(8.0, 3.0))
                             .show(ui, |ui| {
-                                ui.set_width(64.0);
-                                ui.vertical_centered(|ui| {
-                                    // Subchannel Badge & Header
-                                    ui.horizontal(|ui| {
-                                        ui.label(RichText::new(format!("{:02}", sub_idx + 1)).strong().size(8.0).color(track_color));
-                                        ui.label(RichText::new(label).strong().size(8.0).color(app.theme.text_primary));
-                                        if ui.add(egui::Button::new(RichText::new("🔍").size(7.0)).fill(app.theme.bg_inset)).on_hover_text("Inspect Channel").clicked() {
-                                            app.mixer.focused_detail_channel = sub_idx + 4;
-                                            app.active_view = crate::View::ChannelDetail;
-                                        }
-                                    });
-
-                                    ui.add_space(2.0);
-
-                                    // ▶ TRIGGER Button on subchannel
-                                    let trig_btn = egui::Button::new(RichText::new("▶ TRIG").size(8.0).strong().color(app.theme.text_primary))
-                                        .fill(track_color.linear_multiply(0.35));
-                                    if ui.add_sized([56.0, 18.0], trig_btn).clicked() {
-                                        let event = MidiEvent {
-                                            timestamp_samples: 0,
-                                            status: 0x90,
-                                            data1: note,
-                                            data2: 120,
-                                            _pad: 0,
-                                        };
-                                        let _ = app.command_sender.send(Command::Core(CoreCommand::InjectMidi(event)));
-                                    }
-
-                                    ui.add_space(2.0);
-
-                                    // Sample Picker Dropdown
-                                    let current_src = app.composer.track_sources[sub_idx];
-                                    let cached_track = current_src.and_then(|id| app.get_cached_track(id));
-                                    let combo_label = cached_track.as_ref()
-                                        .map(|t| format!("♪ {}", t.title))
-                                        .unwrap_or_else(|| "⊕ SAMPLE".to_string());
-
-                                    egui::ComboBox::from_id_source(format!("sub_sample_sel_{}", sub_idx))
-                                        .width(56.0)
-                                        .selected_text(RichText::new(&combo_label).size(7.0).strong())
-                                        .show_ui(ui, |ui| {
-                                            if ui.selectable_label(current_src.is_none(), "(None)").clicked() {
-                                                app.composer.track_sources[sub_idx] = None;
-                                            }
-                                            for lib_track in &app.library.cached_library_raw {
-                                                let is_sel = current_src == Some(lib_track.id);
-                                                if ui.selectable_label(is_sel, format!("♪ {}", lib_track.title)).clicked() {
-                                                    app.composer.track_sources[sub_idx] = Some(lib_track.id);
-                                                }
-                                            }
-                                        });
-
-                                    ui.add_space(4.0);
-
-                                    // --- MODULAR INSERTS RACK ---
-                                    ui.add_space(2.0);
-                                    ui.label(RichText::new("INSERTS RACK").size(7.0).strong().color(app.theme.text_secondary));
-                                    ui.add_space(2.0);
-
-                                    let mut fx_to_remove = None;
-                                    let mut fx_to_move_up = None;
-                                    let mut fx_to_move_down = None;
-
-                                    let inserts = app.sampler.subchannel_inserts[sub_idx].clone();
-                                    let total_fx = inserts.len();
-
-                                    for (fx_i, fx_name) in inserts.iter().enumerate() {
-                                        ui.push_id(fx_i, |ui| {
-                                            Frame::none()
-                                                .fill(app.theme.bg_inset)
-                                                .rounding(Rounding::same(app.theme.radius_sm))
-                                                .inner_margin(Margin::same(2.0))
-                                                .stroke(Stroke::new(1.0_f32, app.theme.border_stroke.color))
-                                                .show(ui, |ui| {
-                                                    ui.set_width(58.0);
-                                                    ui.vertical(|ui| {
-                                                        ui.horizontal(|ui| {
-                                                            ui.label(RichText::new(fx_name).size(6.0).strong().color(track_color));
-                                                            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                                                if ui.add(egui::Button::new(RichText::new("×").size(8.0).strong().color(app.theme.danger)).min_size(Vec2::new(10.0, 10.0))).clicked() {
-                                                                    fx_to_remove = Some(fx_i);
-                                                                }
-                                                                if fx_i < total_fx - 1 {
-                                                                    if ui.add(egui::Button::new(RichText::new("▼").size(6.0)).min_size(Vec2::new(8.0, 8.0))).clicked() {
-                                                                        fx_to_move_down = Some(fx_i);
-                                                                    }
-                                                                }
-                                                                if fx_i > 0 {
-                                                                    if ui.add(egui::Button::new(RichText::new("▲").size(6.0)).min_size(Vec2::new(8.0, 8.0))).clicked() {
-                                                                        fx_to_move_up = Some(fx_i);
-                                                                    }
-                                                                }
-                                                            });
-                                                        });
-
-                                                        ui.add_space(1.0);
-
-                                                        if fx_name.contains("SIGNAL GENERATOR") {
-                                                            ui.label(RichText::new("GEN").size(6.0).color(app.theme.accent));
-                                                        } else if fx_name == "PITCH SWEEP" {
-                                                            let mut tune = app.sampler.pad_tune[sub_idx];
-                                                            if widgets::knobs::render_knob_sized(ui, &mut tune, 0.0..=1.0, "TUNE", app.theme.warning, 20.0).changed() {
-                                                                app.sampler.pad_tune[sub_idx] = tune;
-                                                                if let Some(dm_node) = app.get_node_id("drum_machine_node") {
-                                                                    let _ = app.command_sender.send(Command::Mixer(MixerCommand::SetParam {
-                                                                        target_id: dm_node as u64, param_id: (sub_idx * 16 + 0) as u32, value: tune, ramp_duration_samples: 0,
-                                                                    }));
-                                                                }
-                                                            }
-                                                            let mut sweep = app.sampler.pad_sweep[sub_idx];
-                                                            if widgets::knobs::render_knob_sized(ui, &mut sweep, 0.0..=1.0, "SWEEP", app.theme.warning, 20.0).changed() {
-                                                                app.sampler.pad_sweep[sub_idx] = sweep;
-                                                                if let Some(dm_node) = app.get_node_id("drum_machine_node") {
-                                                                    let _ = app.command_sender.send(Command::Mixer(MixerCommand::SetParam {
-                                                                        target_id: dm_node as u64, param_id: (sub_idx * 16 + 2) as u32, value: sweep, ramp_duration_samples: 0,
-                                                                    }));
-                                                                }
-                                                            }
-                                                        } else if fx_name == "DECAY ENVELOPE" {
-                                                            let mut decay = app.sampler.pad_decay[sub_idx];
-                                                            if widgets::knobs::render_knob_sized(ui, &mut decay, 0.0..=1.0, "DECAY", app.theme.warning, 20.0).changed() {
-                                                                app.sampler.pad_decay[sub_idx] = decay;
-                                                                if let Some(dm_node) = app.get_node_id("drum_machine_node") {
-                                                                    let _ = app.command_sender.send(Command::Mixer(MixerCommand::SetParam {
-                                                                        target_id: dm_node as u64, param_id: (sub_idx * 16 + 1) as u32, value: decay, ramp_duration_samples: 0,
-                                                                    }));
-                                                                }
-                                                            }
-                                                        } else if fx_name == "SATURATION DRIVE" {
-                                                            let mut drive = app.sampler.pad_drive[sub_idx];
-                                                            if widgets::knobs::render_knob_sized(ui, &mut drive, 0.0..=1.0, "DRIVE", app.theme.danger, 20.0).changed() {
-                                                                app.sampler.pad_drive[sub_idx] = drive;
-                                                                if let Some(dm_node) = app.get_node_id("drum_machine_node") {
-                                                                    let _ = app.command_sender.send(Command::Mixer(MixerCommand::SetParam {
-                                                                        target_id: dm_node as u64, param_id: (sub_idx * 16 + 4) as u32, value: drive, ramp_duration_samples: 0,
-                                                                    }));
-                                                                }
-                                                            }
-                                                        } else if fx_name == "3-BAND EQ" {
-                                                            widgets::knobs::render_knob_sized(ui, &mut app.sampler.subchannel_eq_high[sub_idx], 0.0..=2.0, "HI", track_color, 18.0);
-                                                            widgets::knobs::render_knob_sized(ui, &mut app.sampler.subchannel_eq_mid[sub_idx], 0.0..=2.0, "MID", track_color, 18.0);
-                                                            widgets::knobs::render_knob_sized(ui, &mut app.sampler.subchannel_eq_low[sub_idx], 0.0..=2.0, "LOW", track_color, 18.0);
-                                                        } else {
-                                                            let mut p_val = app.sampler.subchannel_insert_params[sub_idx].get(fx_i).map(|p| p[0]).unwrap_or(0.5);
-                                                            if widgets::knobs::render_knob_sized(ui, &mut p_val, 0.0..=1.0, "FX", track_color, 20.0).changed() {
-                                                                if let Some(p) = app.sampler.subchannel_insert_params[sub_idx].get_mut(fx_i) { p[0] = p_val; }
-                                                            }
-                                                        }
-                                                    });
-                                                });
-                                        });
-                                        ui.add_space(2.0);
-                                    }
-
-                                    // Add "+ FX" Button on subchannel
-                                    if ui.add_sized([56.0, 16.0], egui::Button::new(RichText::new("+ FX").size(8.0).strong()).fill(app.theme.bg_inset)).clicked() {
-                                        app.active_right_tab = Some(crate::RightTab::Store);
-                                        app.store.active_category = Some(sidecar_sdk::AssetCategory::AudioInsert);
-                                    }
-
-                                    if let Some(idx) = fx_to_move_up {
-                                        if idx > 0 && idx < app.sampler.subchannel_inserts[sub_idx].len() {
-                                            app.sampler.subchannel_inserts[sub_idx].swap(idx, idx - 1);
-                                            app.sampler.subchannel_insert_params[sub_idx].swap(idx, idx - 1);
-                                        }
-                                    }
-                                    if let Some(idx) = fx_to_move_down {
-                                        if idx + 1 < app.sampler.subchannel_inserts[sub_idx].len() {
-                                            app.sampler.subchannel_inserts[sub_idx].swap(idx, idx + 1);
-                                            app.sampler.subchannel_insert_params[sub_idx].swap(idx, idx + 1);
-                                        }
-                                    }
-                                    if let Some(remove_i) = fx_to_remove {
-                                        if remove_i < app.sampler.subchannel_inserts[sub_idx].len() {
-                                            app.sampler.subchannel_inserts[sub_idx].remove(remove_i);
-                                            app.sampler.subchannel_insert_params[sub_idx].remove(remove_i);
-                                        }
-                                    }
-
-                                    ui.add_space(2.0);
-
-                                    // Rotary Knob: TRIM / GAIN
-                                    let mut gain_val = app.sampler.subchannel_gain[sub_idx];
-                                    if widgets::knobs::render_knob_sized(ui, &mut gain_val, 0.0..=2.0, "TRIM", track_color, 24.0).changed() {
-                                        app.sampler.subchannel_gain[sub_idx] = gain_val;
-                                        if let Some(dm_node) = app.get_node_id("drum_machine_node") {
-                                            let _ = app.command_sender.send(Command::Mixer(MixerCommand::SetParam {
-                                                target_id: dm_node as u64,
-                                                param_id: (sub_idx * 16 + 7) as u32,
-                                                value: gain_val,
-                                                ramp_duration_samples: 0,
-                                            }));
-                                        }
-                                    }
-
-                                    ui.add_space(2.0);
-
-                                    // Mute / Solo Buttons
-                                    ui.horizontal(|ui| {
-                                        let mut mute = app.sampler.subchannel_mutes[sub_idx];
-                                        let mute_color = if mute { app.theme.danger } else { app.theme.bg_inset };
-                                        if ui.add_sized([22.0, 14.0], egui::Button::new(RichText::new("M").size(7.0).strong()).fill(mute_color)).clicked() {
-                                            mute = !mute;
-                                            app.sampler.subchannel_mutes[sub_idx] = mute;
-                                        }
-
-                                        let mut solo = app.sampler.subchannel_solos[sub_idx];
-                                        let solo_color = if solo { app.theme.warning } else { app.theme.bg_inset };
-                                        if ui.add_sized([22.0, 14.0], egui::Button::new(RichText::new("S").size(7.0).strong()).fill(solo_color)).clicked() {
-                                            solo = !solo;
-                                            app.sampler.subchannel_solos[sub_idx] = solo;
-                                        }
-                                    });
-
-                                    ui.add_space(2.0);
-
-                                    // Linear Volume Fader
-                                    let mut fader_val = app.sampler.subchannel_faders[sub_idx];
-                                    if ui.add(egui::Slider::new(&mut fader_val, 0.0..=1.2).vertical().show_value(false)).changed() {
-                                        app.sampler.subchannel_faders[sub_idx] = fader_val;
-                                    }
-
-                                    ui.add_space(2.0);
-
-                                    // Peak VU Meter
-                                    if let Some(t) = telemetry {
-                                        let lvl = t.peak_levels.get(sub_idx).cloned().unwrap_or(0.0);
-                                        widgets::render_vu_meter(ui, lvl, app.mixer.channel_peak_hold[sub_idx], track_color, 30.0);
-                                    }
-                                });
+                                ui.label(RichText::new("● RECORDING IN PROGRESS").size(10.0).strong().color(theme.danger.gamma_multiply(alpha)));
+                            });
+                    } else {
+                        Frame::none()
+                            .fill(theme.bg_inset)
+                            .rounding(theme.radius_sm)
+                            .stroke(Stroke::new(1.0, theme.border_stroke.color))
+                            .inner_margin(Margin::symmetric(8.0, 3.0))
+                            .show(ui, |ui| {
+                                ui.label(RichText::new("READY TO CAPTURE").size(10.0).strong().color(theme.success));
                             });
                     }
                 });
             });
         });
 
-    ui.add_space(8.0);
+    ui.add_space(theme.space_sm);
 
-    // Standalone Capture Controls Panel
-    ui.vertical(|ui| {
-        ui.heading("Standalone Capture & Sampling Settings");
-        ui.add_space(6.0);
+    // --- Primary Waveform Preview & Replay Canvas ---
+    Frame::none()
+        .fill(theme.bg_dark)
+        .rounding(theme.radius_md)
+        .stroke(theme.border_stroke)
+        .inner_margin(Margin::same(theme.space_md))
+        .show(ui, |ui| {
+            ui.vertical(|ui| {
+                ui.horizontal(|ui| {
+                    ui.label(RichText::new(format!("{} CAPTURED SAMPLE BUFFER", egui_phosphor::regular::WAVEFORM)).strong().size(theme.type_caption).color(theme.accent));
+                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                        if ui.button(RichText::new(format!("{} RESET ZOOM", egui_phosphor::regular::ARROW_COUNTER_CLOCKWISE)).size(theme.type_caption)).clicked() {
+                            app.sampler.sampler_waveform_zoom = 1.0;
+                        }
+                        ui.add_space(theme.space_xs);
+                        ui.add(egui::Slider::new(&mut app.sampler.sampler_waveform_zoom, 1.0..=32.0).logarithmic(true).show_value(false));
+                        ui.label(RichText::new("ZOOM:").size(theme.type_caption).strong());
+                    });
+                });
+
+                ui.add_space(theme.space_xs);
+
+                // Waveform Painter
+                let (rect, _response) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 120.0), Sense::hover());
+                ui.painter().rect_filled(rect, theme.radius_sm, theme.bg_dark);
+                ui.painter().rect_stroke(rect, theme.radius_sm, Stroke::new(1.0, theme.border_stroke.color));
+
+                if let (Some(wgpu_mtx), Some(wf_mtx)) = (&app.wgpu_renderer, &app.waveform_renderer) {
+                    let wgpu = wgpu_mtx.lock();
+                    let mut wf = wf_mtx.lock();
+
+                    if let Some(track_id) = app.sampler.source_track.or(app.library.selected_library_track) {
+                        if let Some(track) = app.get_cached_track(track_id) {
+                            wf.update_from_mip_waveform(&wgpu.queue, &track.metadata.mip_waveform, app.sampler.sampler_waveform_zoom, rect.width() as u32, theme.accent.to_array().map(|v| v as f32 / 255.0));
+                        }
+                    }
+
+                    let color = theme.accent.to_array().map(|v| v as f32 / 255.0);
+                    wf.update_globals(&wgpu.queue, 0.0, app.sampler.sampler_waveform_zoom, false, app.mixer.waveform_styles[0], color);
+
+                    nullherz_ui_hal::render::waveform_renderer::ui_paint_waveform(ui, rect, wf_mtx.clone());
+                }
+            });
+        });
+
+    ui.add_space(theme.space_sm);
+
+    // --- Two-Column Layout: Input Selection & Transport + FX Inserts Rack ---
+    ui.columns(2, |cols| {
+        // Left Column: Input Selection, Transport & Recording Controls
+        let ui = &mut cols[0];
         Frame::none()
-            .fill(app.theme.bg_surface)
-            .rounding(app.theme.radius_md)
-            .stroke(app.theme.border_stroke)
-            .inner_margin(app.theme.space_md)
+            .fill(theme.bg_surface)
+            .rounding(theme.radius_md)
+            .stroke(Stroke::new(1.0, theme.border))
+            .inner_margin(Margin::same(theme.space_md))
             .show(ui, |ui| {
-                egui::Grid::new("capture_settings_grid").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
-                    ui.label("Input Source");
+                ui.vertical(|ui| {
+                    ui.label(RichText::new(format!("{} INPUT ROUTING & RECORDING", egui_phosphor::regular::SLIDERS)).strong().size(theme.type_body).color(theme.accent));
+                    ui.add_space(theme.space_xs);
+
+                    // Segmented Input Selector
+                    ui.label(RichText::new("Input Source:").size(theme.type_caption).strong());
                     let options = [
                         (0, "MST"),
-                        (1, "A"),
-                        (2, "B"),
-                        (3, "C"),
-                        (4, "D"),
-                        (5, "EXT"),
+                        (1, "Deck A"),
+                        (2, "Deck B"),
+                        (3, "Deck C"),
+                        (4, "Deck D"),
+                        (5, "EXT In"),
                     ];
                     let old_source = app.sampler.sampler_input_source;
-                    nullherz_ui_hal::widgets::render_segmented_control(
+                    widgets::render_segmented_control(
                         ui,
-                        &app.theme,
+                        &theme,
                         &mut app.sampler.sampler_input_source,
                         &options,
                     );
+
                     if app.sampler.sampler_input_source != old_source {
                         let src_node = match app.sampler.sampler_input_source {
                             0 => app.get_node_id("master_sum_l"),
@@ -446,74 +158,102 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                             }));
                         }
                     }
-                    ui.end_row();
 
-                    ui.label("Input Gain");
+                    ui.add_space(theme.space_sm);
+
+                    // Gain & Monitor Rotary Knobs with VU Meter
+                    Frame::none()
+                        .fill(theme.bg_inset)
+                        .rounding(theme.radius_sm)
+                        .stroke(Stroke::new(1.0, theme.border_stroke.color))
+                        .inner_margin(Margin::same(theme.space_sm))
+                        .show(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.spacing_mut().item_spacing.x = 20.0;
+
+                                // Gain Knob
+                                ui.horizontal(|ui| {
+                                    if render_knob_sized(ui, &mut app.sampler.sampler_input_gain, 0.0..=4.0, "GAIN", theme.accent, 24.0).changed() {
+                                        if let Some(resolved_node) = app.get_node_id("capture_node") {
+                                            let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                                                target_id: resolved_node as u64, param_id: 0, value: app.sampler.sampler_input_gain, ramp_duration_samples: 0,
+                                            }));
+                                        }
+                                    }
+                                    ui.add_space(2.0);
+                                    ui.vertical(|ui| {
+                                        ui.label(RichText::new("INPUT GAIN").strong().size(9.0).color(theme.accent));
+                                        ui.label(RichText::new(format!("{:.1}x", app.sampler.sampler_input_gain)).size(10.0).color(theme.text_primary));
+                                    });
+                                });
+
+                                // Monitor Knob
+                                ui.horizontal(|ui| {
+                                    if render_knob_sized(ui, &mut app.sampler.sampler_monitor_level, 0.0..=1.0, "MON", theme.warning, 24.0).changed() {
+                                        if let Some(resolved_node) = app.get_node_id("capture_node") {
+                                            let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                                                target_id: resolved_node as u64, param_id: 1, value: app.sampler.sampler_monitor_level, ramp_duration_samples: 0,
+                                            }));
+                                        }
+                                    }
+                                    ui.add_space(2.0);
+                                    ui.vertical(|ui| {
+                                        ui.label(RichText::new("MONITOR").strong().size(9.0).color(theme.warning));
+                                        ui.label(RichText::new(format!("{:.0}%", app.sampler.sampler_monitor_level * 100.0)).size(10.0).color(theme.text_primary));
+                                    });
+                                });
+
+                                // Format Toggle
+                                ui.horizontal(|ui| {
+                                    if ui.checkbox(&mut app.sampler.sampler_is_stereo, "Stereo").changed() {
+                                        if let Some(resolved_node) = app.get_node_id("capture_node") {
+                                            let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
+                                                target_id: resolved_node as u64, param_id: 2, value: if app.sampler.sampler_is_stereo { 1.0 } else { 0.0 }, ramp_duration_samples: 0,
+                                            }));
+                                        }
+                                    }
+                                });
+                            });
+                        });
+
+                    ui.add_space(theme.space_sm);
+
+                    // Transport & Capture Buttons Row
                     ui.horizontal(|ui| {
-                        if ui.add(egui::Slider::new(&mut app.sampler.sampler_input_gain, 0.0..=4.0)).changed() {
+                        ui.spacing_mut().item_spacing.x = 6.0;
+
+                        // RECORD / STOP Toggle
+                        let rec_icon = if app.sampler.sampler_is_recording { egui_phosphor::regular::SQUARE } else { egui_phosphor::regular::RECORD };
+                        let rec_label = if app.sampler.sampler_is_recording { "STOP" } else { "RECORD" };
+                        let rec_bg = if app.sampler.sampler_is_recording { theme.danger } else { theme.accent };
+
+                        let rec_btn = egui::Button::new(RichText::new(format!("{} {}", rec_icon, rec_label)).strong().size(theme.type_body).color(Color32::BLACK)).fill(rec_bg);
+
+                        if ui.add_sized([120.0, 32.0], rec_btn).clicked() {
+                            app.sampler.sampler_is_recording = !app.sampler.sampler_is_recording;
                             if let Some(resolved_node) = app.get_node_id("capture_node") {
                                 let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
-                                    target_id: resolved_node as u64, param_id: 0, value: app.sampler.sampler_input_gain, ramp_duration_samples: 0,
+                                    target_id: resolved_node as u64, param_id: 3, value: if app.sampler.sampler_is_recording { 1.0 } else { 0.0 }, ramp_duration_samples: 0,
                                 }));
                             }
                         }
-                        if let Some(t) = telemetry {
-                            let level = t.peak_levels.get(app.sampler.sampler_input_source).cloned().unwrap_or(0.0);
-                            widgets::render_vu_meter(ui, level, app.mixer.channel_peak_hold[0], app.theme.accent, 20.0);
+
+                        // REPLAY RECORDED Button
+                        let replay_btn = egui::Button::new(RichText::new(format!("{} REPLAY", egui_phosphor::regular::PLAY)).strong().size(theme.type_body).color(theme.text_primary)).fill(theme.bg_inset);
+                        if ui.add_sized([110.0, 32.0], replay_btn).on_hover_text("Play recorded sample buffer").clicked() {
+                            let event = MidiEvent {
+                                timestamp_samples: 0,
+                                status: 0x90,
+                                data1: 60,
+                                data2: 127,
+                                _pad: 0,
+                            };
+                            let _ = app.command_sender.send(Command::Core(CoreCommand::InjectMidi(event)));
                         }
-                    });
-                    ui.end_row();
 
-                    ui.label("Monitor Level");
-                    if ui.add(egui::Slider::new(&mut app.sampler.sampler_monitor_level, 0.0..=1.0)).changed() {
-                        if let Some(resolved_node) = app.get_node_id("capture_node") {
-                            let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
-                                target_id: resolved_node as u64, param_id: 1, value: app.sampler.sampler_monitor_level, ramp_duration_samples: 0,
-                            }));
-                        }
-                    }
-                    ui.end_row();
-
-                    ui.label("Format");
-                    ui.horizontal(|ui| {
-                        if ui.checkbox(&mut app.sampler.sampler_is_stereo, "Stereo").changed() {
-                            if let Some(resolved_node) = app.get_node_id("capture_node") {
-                                let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
-                                    target_id: resolved_node as u64, param_id: 2, value: if app.sampler.sampler_is_stereo { 1.0 } else { 0.0 }, ramp_duration_samples: 0,
-                                }));
-                            }
-                        }
-                    });
-                    ui.end_row();
-                });
-
-                ui.add_space(10.0);
-                ui.horizontal(|ui| {
-                    let rec_btn = if app.sampler.sampler_is_recording {
-                        egui::Button::new(RichText::new("■ STOP").strong().color(app.theme.text_primary)).fill(app.theme.danger)
-                    } else {
-                        egui::Button::new(RichText::new("● RECORD").strong().color(app.theme.text_primary)).fill(app.theme.danger)
-                    };
-
-                    if ui.add(rec_btn.min_size(Vec2::new(100.0, 28.0))).clicked() {
-                        app.sampler.sampler_is_recording = !app.sampler.sampler_is_recording;
-                        if let Some(resolved_node) = app.get_node_id("capture_node") {
-                            let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
-                                target_id: resolved_node as u64, param_id: 3, value: if app.sampler.sampler_is_recording { 1.0 } else { 0.0 }, ramp_duration_samples: 0,
-                            }));
-                        }
-                    }
-
-                    if ui.add(egui::Button::new("RESET").min_size(Vec2::new(60.0, 28.0))).clicked() {
-                        if let Some(resolved_node) = app.get_node_id("capture_node") {
-                            let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
-                                target_id: resolved_node as u64, param_id: 4, value: 1.0, ramp_duration_samples: 0,
-                            }));
-                        }
-                    }
-
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        if ui.button(RichText::new("COMMIT TO LIBRARY").strong().color(app.theme.accent)).clicked() {
+                        // COMMIT TO LIBRARY
+                        let commit_btn = egui::Button::new(RichText::new(format!("{} SAVE", egui_phosphor::regular::FLOPPY_DISK)).strong().size(theme.type_body).color(theme.text_primary)).fill(theme.bg_inset);
+                        if ui.add_sized([90.0, 32.0], commit_btn).on_hover_text("Save sample into library assets").clicked() {
                             let sample_id = app.sampler.next_sample_id;
                             app.sampler.next_sample_id += 1;
                             if let Some(resolved_node) = app.get_node_id("capture_node") {
@@ -523,6 +263,94 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                             }
                         }
                     });
+                });
+            });
+
+        // Right Column: FX Inserts Rack
+        let ui = &mut cols[1];
+        Frame::none()
+            .fill(theme.bg_surface)
+            .rounding(theme.radius_md)
+            .stroke(Stroke::new(1.0, theme.border))
+            .inner_margin(Margin::same(theme.space_md))
+            .show(ui, |ui| {
+                ui.vertical(|ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(RichText::new(format!("{} MODULAR FX INSERTS RACK", egui_phosphor::regular::FADERS)).strong().size(theme.type_body).color(theme.accent));
+                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                            if ui.add(egui::Button::new(RichText::new("+ FX").size(theme.type_caption).strong()).fill(theme.bg_inset)).clicked() {
+                                app.active_right_tab = Some(crate::RightTab::Store);
+                                app.store.active_category = Some(sidecar_sdk::AssetCategory::AudioInsert);
+                            }
+                        });
+                    });
+
+                    ui.add_space(theme.space_xs);
+
+                    let sub_idx = 0; // Main Sampler FX channel
+                    let inserts = app.sampler.subchannel_inserts[sub_idx].clone();
+                    let mut fx_to_remove = None;
+
+                    if inserts.is_empty() {
+                        ui.vertical_centered(|ui| {
+                            ui.add_space(20.0);
+                            ui.label(RichText::new("NO FX INSERTS ATTACHED").size(theme.type_caption).color(theme.text_secondary));
+                            ui.label(RichText::new("Click '+ FX' to load audio processors from Store inventory.").size(8.5).color(theme.text_secondary));
+                            ui.add_space(20.0);
+                        });
+                    } else {
+                        for (fx_i, fx_name) in inserts.iter().enumerate() {
+                            Frame::none()
+                                .fill(theme.bg_inset)
+                                .rounding(theme.radius_sm)
+                                .stroke(Stroke::new(1.0, theme.border_stroke.color))
+                                .inner_margin(Margin::same(theme.space_xs))
+                                .show(ui, |ui| {
+                                    ui.horizontal(|ui| {
+                                        ui.label(RichText::new(format!("• {}", fx_name)).strong().size(theme.type_caption).color(theme.accent));
+                                        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                                            if ui.button(RichText::new("×").size(10.0).strong().color(theme.danger)).clicked() {
+                                                fx_to_remove = Some(fx_i);
+                                            }
+                                        });
+                                    });
+
+                                    ui.add_space(2.0);
+
+                                    // Dynamic Insert Controls
+                                    if fx_name == "3-BAND EQ" {
+                                        ui.horizontal(|ui| {
+                                            render_knob_sized(ui, &mut app.sampler.subchannel_eq_high[sub_idx], 0.0..=2.0, "HI", theme.accent, 20.0);
+                                            render_knob_sized(ui, &mut app.sampler.subchannel_eq_mid[sub_idx], 0.0..=2.0, "MID", theme.accent, 20.0);
+                                            render_knob_sized(ui, &mut app.sampler.subchannel_eq_low[sub_idx], 0.0..=2.0, "LOW", theme.accent, 20.0);
+                                        });
+                                    } else if fx_name == "PITCH" {
+                                        let mut tune = app.sampler.pad_tune[sub_idx];
+                                        if render_knob_sized(ui, &mut tune, 0.0..=1.0, "PITCH", theme.warning, 20.0).changed() {
+                                            app.sampler.pad_tune[sub_idx] = tune;
+                                            if let Some(dm_node) = app.get_node_id("capture_node") {
+                                                let _ = app.command_sender.send(Command::Mixer(MixerCommand::SetParam {
+                                                    target_id: dm_node as u64, param_id: 5, value: tune, ramp_duration_samples: 0,
+                                                }));
+                                            }
+                                        }
+                                    } else {
+                                        let mut p_val = app.sampler.subchannel_insert_params[sub_idx].get(fx_i).map(|p| p[0]).unwrap_or(0.5);
+                                        if render_knob_sized(ui, &mut p_val, 0.0..=1.0, "MIX", theme.accent, 20.0).changed() {
+                                            if let Some(p) = app.sampler.subchannel_insert_params[sub_idx].get_mut(fx_i) { p[0] = p_val; }
+                                        }
+                                    }
+                                });
+                            ui.add_space(4.0);
+                        }
+
+                        if let Some(rem_i) = fx_to_remove {
+                            if rem_i < app.sampler.subchannel_inserts[sub_idx].len() {
+                                app.sampler.subchannel_inserts[sub_idx].remove(rem_i);
+                                app.sampler.subchannel_insert_params[sub_idx].remove(rem_i);
+                            }
+                        }
+                    }
                 });
             });
     });
