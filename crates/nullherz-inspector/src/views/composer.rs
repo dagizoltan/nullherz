@@ -328,6 +328,28 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                 }
                                 ui.add_space(1.0);
                             }
+
+                            // Left Header row for Automation Sub-Lane
+                            ui.allocate_ui_with_layout(Vec2::new(175.0, 32.0), egui::Layout::left_to_right(egui::Align::Center), |ui| {
+                                let (rect, _) = ui.allocate_exact_size(Vec2::new(175.0, 32.0), Sense::hover());
+                                ui.painter().rect_filled(rect, Rounding::same(2.0), app.theme.bg_inset);
+                                ui.painter().text(
+                                    Pos2::new(rect.min.x + 8.0, rect.center().y - 4.0),
+                                    egui::Align2::LEFT_CENTER,
+                                    "📈 AUTOMATION LANE",
+                                    egui::FontId::new(9.0, egui::FontFamily::Proportional),
+                                    app.theme.accent,
+                                );
+                                let pts_count = app.composer.automation_data.get(&(track_idx as u64)).map(|v| v.len()).unwrap_or(0);
+                                ui.painter().text(
+                                    Pos2::new(rect.min.x + 8.0, rect.center().y + 8.0),
+                                    egui::Align2::LEFT_CENTER,
+                                    format!("{} Points Recorded", pts_count),
+                                    egui::FontId::new(8.0, egui::FontFamily::Monospace),
+                                    app.theme.text_secondary,
+                                );
+                            });
+                            ui.add_space(1.0);
                         }
 
                         if track_idx < num_active_channels - 1 {
@@ -551,6 +573,57 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                     if sub_count < 16 {
                                         ui.allocate_space(Vec2::new(ui.available_width(), 20.0));
                                         ui.add_space(1.0);
+                                    }
+                                }
+
+                                // ACCORDION EXPANSION: Parameter Automation Sub-Lane Canvas
+                                if is_selected {
+                                    ui.add_space(2.0);
+                                    let (auto_rect, auto_resp) = ui.allocate_exact_size(Vec2::new(slot_w * steps_count as f32 + (steps_count as f32 * 2.0), 32.0), Sense::click_and_drag());
+                                    ui.painter().rect_filled(auto_rect, Rounding::same(2.0), app.theme.bg_inset);
+                                    ui.painter().rect_stroke(auto_rect, Rounding::same(2.0), Stroke::new(1.0_f32, app.theme.border_stroke.color));
+
+                                    // Render gridline guides inside automation canvas
+                                    let grid_steps = steps_per_bar.max(4);
+                                    for s in 0..steps_count {
+                                        if s % grid_steps == 0 {
+                                            let x = auto_rect.left() + (s as f32 * slot_w) + (s as f32 * 2.0);
+                                            ui.painter().line_segment(
+                                                [Pos2::new(x, auto_rect.top()), Pos2::new(x, auto_rect.bottom())],
+                                                Stroke::new(1.0, app.theme.border_stroke.color.linear_multiply(0.5)),
+                                            );
+                                        }
+                                    }
+
+                                    // Draw parameter automation points and vector envelope line
+                                    if let Some(points) = app.composer.automation_data.get(&(track_idx as u64)) {
+                                        if points.len() >= 2 {
+                                            let pts: Vec<Pos2> = points.iter().map(|(t, v)| {
+                                                let norm_x = (*t as f32 / 16.0).clamp(0.0, 1.0);
+                                                let x = auto_rect.left() + norm_x * auto_rect.width();
+                                                let y = auto_rect.bottom() - v.clamp(0.0, 1.0) * auto_rect.height();
+                                                Pos2::new(x, y)
+                                            }).collect();
+
+                                            for w in pts.windows(2) {
+                                                ui.painter().line_segment([w[0], w[1]], Stroke::new(1.5, track_color));
+                                            }
+                                            for p in &pts {
+                                                ui.painter().circle_filled(*p, 3.0, track_color);
+                                            }
+                                        }
+                                    }
+
+                                    // Interactive click/drag on automation lane to add points
+                                    if auto_resp.clicked() || auto_resp.dragged() {
+                                        if let Some(pos) = auto_resp.interact_pointer_pos() {
+                                            let rel_x = ((pos.x - auto_rect.left()) / auto_rect.width()).clamp(0.0, 1.0);
+                                            let rel_y = ((auto_rect.bottom() - pos.y) / auto_rect.height()).clamp(0.0, 1.0);
+                                            let time_sec = rel_x as f64 * 16.0;
+                                            let entry = app.composer.automation_data.entry(track_idx as u64).or_default();
+                                            entry.push((time_sec, rel_y));
+                                            entry.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+                                        }
                                     }
                                 }
 
