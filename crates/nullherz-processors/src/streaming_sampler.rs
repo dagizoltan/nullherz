@@ -67,11 +67,16 @@ impl SignalProcessor for StreamingSamplerProcessor {
         }
 
         for i in 0..num_samples {
-            let sample_opt = unsafe { (*self.ring_buffer).pop() };
-            if let Some(sample) = sample_opt {
-                let scaled_sample = sample * self.volume;
-                for ch in 0..num_channels {
-                    outputs[ch][i] = scaled_sample;
+            if let Some(sample_l) = unsafe { (*self.ring_buffer).pop() } {
+                let sample_r = unsafe { (*self.ring_buffer).pop() }.unwrap_or(sample_l);
+                if num_channels >= 2 {
+                    outputs[0][i] = sample_l * self.volume;
+                    outputs[1][i] = sample_r * self.volume;
+                    for ch in 2..num_channels {
+                        outputs[ch][i] = sample_l * self.volume;
+                    }
+                } else if num_channels == 1 {
+                    outputs[0][i] = sample_l * self.volume;
                 }
             } else {
                 for ch in 0..num_channels {
@@ -161,10 +166,12 @@ mod tests {
         let aligned_ptr = unsafe { mem.as_mut_ptr().add(mem.as_mut_ptr().align_offset(64)) };
         let rb_ptr = unsafe { ShmRingBuffer::<f32>::init(aligned_ptr, capacity) };
 
-        // Push test samples into ring buffer
+        // Push interleaved stereo test samples into ring buffer (L0, R0, L1, R1)
         unsafe {
             (*rb_ptr).push(0.5).unwrap();
+            (*rb_ptr).push(0.25).unwrap();
             (*rb_ptr).push(-0.25).unwrap();
+            (*rb_ptr).push(-0.125).unwrap();
         }
 
         let mut sampler = StreamingSamplerProcessor::new(1, rb_ptr);
@@ -186,10 +193,10 @@ mod tests {
 
         sampler.process(&[], outputs, &mut context);
 
-        // Verify correct stereo distribution and gain scaling
+        // Verify correct stereo separation and gain scaling
         assert_eq!(out_l[0], 0.5);
-        assert_eq!(out_r[0], 0.5);
+        assert_eq!(out_r[0], 0.25);
         assert_eq!(out_l[1], -0.25);
-        assert_eq!(out_r[1], -0.25);
+        assert_eq!(out_r[1], -0.125);
     }
 }

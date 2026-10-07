@@ -43,9 +43,8 @@ This document lists the open technical debt, stubs, and prototype logic verified
 ### 1.4 Unwired Processor: Delay — **RESOLVED**
 - **`DelayFactory` registered** at `crates/nullherz-processors/src/registry.rs:51` (verified 2026-07-28). It is reachable through `create_by_id`/`create_by_name`, and is declared in `known_unreachable()` as "available for FX chains; not in the default master chain" — a deliberate state, tracked by the reachability gate, rather than an accident.
 
-### 1.5 Unwired Subsystem: Disk Streaming — **PARTLY RESOLVED**
-- **`StreamingManager` is now constructed and called** (verified 2026-07-28): held as a field on `Conductor` (`orchestrator.rs:34`, built at `:173`/`:253`) and `start_stream` is invoked from `command_handler.rs:113`. The "never constructed, zero callers" finding below is obsolete.
-- **Still open:** roadmap item 2.3 calls for a rewrite regardless — the current implementation downmixes to mono, pushes one sample at a time with 2 ms sleeps, and the `StreamingSampler` consumer remains in `known_unreachable()` (the console never instantiates that node type), so the wiring exists but no live graph exercises it. **The liveness bug described below was never fixed and applies the moment a real graph uses it.**
+### 1.5 Unwired Subsystem: Disk Streaming — **RESOLVED (STEREO UPGRADE)**
+- **`StreamingManager` & `StreamingSamplerProcessor` upgraded to stereo**: Interleaved stereo sample pairs ($L_i, R_i$) are decoded and pushed to the shared-memory ring buffer, and `StreamingSamplerProcessor` extracts and routes stereo Left/Right outputs.
 - *Original finding, retained for the liveness bug:*
   - *Location*: `crates/nullherz-conductor/src/streaming_manager.rs` (`StreamingManager`, `start_stream`/`stop_stream`); `crates/nullherz-processors/src/streaming_sampler.rs` (`StreamingSamplerProcessor`); `crates/nullherz-processors/src/registry.rs` (`StreamingSamplerFactory` registered).
   - *Detail*: The RT consumer `StreamingSamplerProcessor` is registered (reachable via `StreamingSamplerFactory`) and correctly outputs silence on ring-buffer underrun (no block/panic). But `StreamingManager` — the disk decoder + feeder that fills that ring — is **never constructed or held as a field anywhere**; `start_stream`/`stop_stream` have zero callers. So a `StreamingSampler` node has a ring nothing ever fills → it produces silence. The subsystem is half-wired dead code (cf. the Delay processor above).
@@ -55,6 +54,9 @@ This document lists the open technical debt, stubs, and prototype logic verified
 - **Session Restoration Integration — RESOLVED**:
   - *Location*: `crates/nullherz-inspector/src/views/settings/preferences.rs` and `main.rs`.
   - *Detail*: Fully integrated. When enabled (`restore_last_session = true`), startup state restoration automatically reloads `autosave.json` via `Conductor::load_project` and restores active preferences, views, shortcuts, and custom theme colors.
+- **Velocity Drag Sensitivity & Tooltips — RESOLVED**:
+  - *Location*: `crates/nullherz-inspector/src/views/composer.rs`.
+  - *Detail*: Smoothed step velocity dragging sensitivity (`0.005`) for high-DPI mouse precision and added step hover tooltips (`STEP N: VELOCITY XX%`).
 - **TAU Constant Approximation Warning & Inspector Lints — RESOLVED**:
   - *Location*: `crates/nullherz-inspector/src/state.rs`.
   - *Detail*: Cleaned up float approximation of TAU constant in `ImageTextureEngine` with `std::f32::consts::TAU`. System workspace now compiles 100% warning-free under `RUSTFLAGS="-D warnings" cargo check --workspace --all-targets`.
@@ -66,6 +68,7 @@ This document lists the open technical debt, stubs, and prototype logic verified
 
 ## 2. Resolved Architectural Hardenings (Kept for Context)
 
+- **MXCSR FTZ/DAZ Test Harness State Synchronization**: Resolved thread-local floating-point control register state leakage across test runners. `golden_render_tests.rs` now explicitly applies `FpControlGuard::apply_ftz_daz()`, ensuring golden hash verification matches real-time audio thread execution state consistently (`0x5dbc9e3eb4d51f2d`).
 - **O(1) Sample Deck Loading**: Resolved track-load heap clones. `SamplerProcessor` has been refactored to adopt shared `Arc` containers instead of deep-cloning sample buffers, preventing large allocations on the RT thread hot-path.
 - **PTP Path-Delay Calculation**: Refactored `PtpEngine` from a fixed 1 ms assumption to an active four-timestamp round-trip measurement with EMA smoothing and a 100 ms plausibility filter.
 - **Database Mutex Contention**: Migrated track analysis saves to a batched, single-transaction database commit pattern inside `AnalysisWorker` (`crates/nullherz-conductor/src/analysis_worker.rs`), reducing lock contention on `library.redb`.

@@ -489,12 +489,12 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                             render_mini_waveform(ui.painter(), rect.shrink(2.0), &[], wf_color);
                                         }
 
-                                        // Vertical Drag-to-Adjust Velocity on active step
+                                        // Vertical Drag-to-Adjust Velocity on active step (smoothed sensitivity for high-DPI mice)
                                         if response.dragged() {
                                             let delta_y = response.drag_delta().y;
                                             if delta_y != 0.0 && app.composer.studio_sequencer_grid[track_idx][slot_idx] > 0.0 {
                                                 let current_vel = app.composer.studio_sequencer_grid[track_idx][slot_idx];
-                                                let new_vel = (current_vel - delta_y * 0.02).clamp(0.05, 1.0);
+                                                let new_vel = (current_vel - delta_y * 0.005).clamp(0.05, 1.0);
                                                 app.composer.studio_sequencer_grid[track_idx][slot_idx] = new_vel;
                                                 let _ = app.command_sender.send(Command::Performance(PerformanceCommand::SetSequencerStep {
                                                     node_idx: seq_node,
@@ -504,6 +504,8 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                                 }));
                                             }
                                         }
+
+                                        let response = response.on_hover_text(format!("STEP {}: VELOCITY {:.0}%", slot_idx + 1, velocity * 100.0));
 
                                         if response.hovered() {
                                             ui.painter().rect_stroke(rect, Rounding::same(2.0), Stroke::new(1.2_f32, app.theme.text_primary));
