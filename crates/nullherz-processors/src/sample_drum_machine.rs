@@ -10,6 +10,7 @@ pub struct SamplePadConfig {
     pub name: [u8; 32],
     pub sample_buffer: Option<SampleBuffer>,
     pub sample_id: Option<u64>,
+    pub source_sample_rate: u32,
     pub start_crop: f32, // 0.0 .. 1.0
     pub end_crop: f32,   // 0.0 .. 1.0
     pub pitch_semitones: f32, // -24.0 .. +24.0
@@ -32,6 +33,7 @@ impl Default for SamplePadConfig {
             name,
             sample_buffer: None,
             sample_id: None,
+            source_sample_rate: 0,
             start_crop: 0.0,
             end_crop: 1.0,
             pitch_semitones: 0.0,
@@ -133,7 +135,13 @@ impl SampleDrumMachineProcessor {
         let end_f = (pad.end_crop.clamp(0.0, 1.0) * total_frames as f32).max(start_f as f32 + 1.0) as f64;
         let end_f = end_f.min(total_frames as f64);
 
-        let rate = 2.0f32.powf(pad.pitch_semitones / 12.0);
+        let source_rate_ratio = if pad.source_sample_rate > 0 && self.sample_rate > 0.0 {
+            pad.source_sample_rate as f32 / self.sample_rate
+        } else {
+            1.0
+        };
+
+        let rate = 2.0f32.powf(pad.pitch_semitones / 12.0) * source_rate_ratio;
 
         let voice = &mut self.voices[pad_idx];
         voice.play_head = start_f;
@@ -342,10 +350,13 @@ impl AudioProcessor for SampleDrumMachineProcessor {
     }
 
     fn apply_topology_mutation(&mut self, mutation: TopologyMutation) {
-        if let TopologyMutation::AddSource { node_idx, buffer, sample_id, .. } = mutation {
+        if let TopologyMutation::AddSource { node_idx, buffer, sample_id, metadata } = mutation {
             let pad_idx = (node_idx as usize) % NUM_PADS;
             self.pads[pad_idx].sample_buffer = Some(buffer);
             self.pads[pad_idx].sample_id = Some(sample_id);
+            if let Some(ref meta) = metadata {
+                self.pads[pad_idx].source_sample_rate = meta.sample_rate;
+            }
         }
     }
 

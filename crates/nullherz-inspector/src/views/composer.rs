@@ -419,7 +419,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                             ui.add_space(6.0);
                                         }
 
-                                        let (rect, response) = ui.allocate_exact_size(Vec2::new(slot_w, slot_h), Sense::click());
+                                        let (rect, response) = ui.allocate_exact_size(Vec2::new(slot_w, slot_h), Sense::click_and_drag());
 
                                         if slot_idx == steps_count - 1 && ui.is_rect_visible(rect) && steps_count < 512 {
                                             extend_grid = true;
@@ -431,14 +431,14 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                             if is_muted {
                                                 app.theme.bg_inset
                                             } else {
-                                                track_color.gamma_multiply(0.35)
+                                                track_color.gamma_multiply(0.20 + 0.50 * velocity)
                                             }
                                         } else {
                                             track_color.gamma_multiply(0.03)
                                         };
 
                                         if app.composer.composer_playing && slot_idx == app.composer.sequencer_active_step {
-                                            bg_color = track_color.gamma_multiply(0.6);
+                                            bg_color = track_color.gamma_multiply(0.7);
                                         }
 
                                         ui.painter().rect_filled(rect, Rounding::same(2.0), bg_color);
@@ -465,6 +465,22 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                         } else if velocity > 0.0 {
                                             let wf_color = if is_muted { app.theme.text_disabled } else { track_color };
                                             render_mini_waveform(ui.painter(), rect.shrink(2.0), &[], wf_color);
+                                        }
+
+                                        // Vertical Drag-to-Adjust Velocity on active step
+                                        if response.dragged() {
+                                            let delta_y = response.drag_delta().y;
+                                            if delta_y != 0.0 && app.composer.studio_sequencer_grid[track_idx][slot_idx] > 0.0 {
+                                                let current_vel = app.composer.studio_sequencer_grid[track_idx][slot_idx];
+                                                let new_vel = (current_vel - delta_y * 0.02).clamp(0.05, 1.0);
+                                                app.composer.studio_sequencer_grid[track_idx][slot_idx] = new_vel;
+                                                let _ = app.command_sender.send(Command::Performance(PerformanceCommand::SetSequencerStep {
+                                                    node_idx: seq_node,
+                                                    track: track_idx as u32,
+                                                    step: slot_idx as u32,
+                                                    value: new_vel,
+                                                }));
+                                            }
                                         }
 
                                         if response.hovered() {
