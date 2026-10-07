@@ -624,7 +624,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                             let time_sec = rel_x as f64 * 16.0;
                                             let entry = app.composer.automation_data.entry(track_idx as u64).or_default();
                                             entry.push((time_sec, rel_y));
-                                            entry.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap());
+                                            entry.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
                                         }
                                     }
                                 }

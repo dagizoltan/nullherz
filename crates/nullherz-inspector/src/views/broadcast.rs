@@ -61,12 +61,14 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
 
     // Dynamic State Machine Transition Simulator (Connecting -> Live)
     if app.broadcast.broadcast_state == 1 {
-        if app.broadcast.broadcast_start_time.is_none() {
-            app.broadcast.broadcast_start_time = Some(current_time);
-        } else if current_time - app.broadcast.broadcast_start_time.unwrap() > 1.5 {
-            // Handshake completed, transitions to LIVE
-            app.broadcast.broadcast_state = 2;
-            app.broadcast.is_streaming = true;
+        if let Some(start_time) = app.broadcast.broadcast_start_time {
+            if current_time - start_time > 1.5 {
+                // Handshake completed, transitions to LIVE
+                app.broadcast.broadcast_state = 2;
+                app.broadcast.is_streaming = true;
+                app.broadcast.broadcast_start_time = Some(current_time);
+            }
+        } else {
             app.broadcast.broadcast_start_time = Some(current_time);
         }
     } else if app.broadcast.broadcast_state == 2 {
