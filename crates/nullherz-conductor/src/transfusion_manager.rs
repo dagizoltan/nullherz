@@ -24,8 +24,9 @@ pub(crate) fn is_generated_track(path: &str) -> bool {
 /// child was silent. `buffer` is PLANAR (channel c at `[c*frames..]`); a WAV is
 /// interleaved, so de-planarize on the way out. On reload `decode_audio_file`
 /// re-planarizes it, round-tripping cleanly.
-pub(crate) fn write_planar_child_wav(path: &str, buffer: &[f32], channels: usize) -> std::io::Result<()> {
+pub(crate) fn write_planar_child_wav(path: &str, buffer: &[f32], channels: usize, sample_rate: u32) -> std::io::Result<()> {
     let channels = channels.max(1);
+    let sample_rate = if sample_rate > 0 { sample_rate } else { 44_100 };
     let frames = buffer.len() / channels;
     if frames == 0 {
         return Err(std::io::Error::other("empty child buffer"));
@@ -35,7 +36,7 @@ pub(crate) fn write_planar_child_wav(path: &str, buffer: &[f32], channels: usize
     }
     let spec = hound::WavSpec {
         channels: channels as u16,
-        sample_rate: 44_100,
+        sample_rate,
         bits_per_sample: 32,
         sample_format: hound::SampleFormat::Float,
     };
@@ -147,9 +148,10 @@ impl EvolutionaryBreeder {
             let child_metadata = Arc::new(child_metadata_struct);
 
             let path = format!("library/evolution/child_{}.wav", child_id);
+            let sr = parent_a.metadata.sample_rate;
             // Persist the audio to disk, or the library row points at a file that
             // never existed and the child is silent after the next restart.
-            if let Err(e) = write_planar_child_wav(&path, &child_buffer, channels) {
+            if let Err(e) = write_planar_child_wav(&path, &child_buffer, channels, sr) {
                 eprintln!("Evolutionary Breeder: failed to write {}: {}", path, e);
             }
 
@@ -292,7 +294,8 @@ impl TransfusionManager {
             let child_metadata = Arc::new(child_metadata_struct);
 
             let path = format!("library/breeding/child_{}.wav", child_id);
-            if let Err(e) = write_planar_child_wav(&path, &child_buffer, channels) {
+            let sr = parent_a.metadata.sample_rate;
+            if let Err(e) = write_planar_child_wav(&path, &child_buffer, channels, sr) {
                 eprintln!("Breeding: failed to write {}: {}", path, e);
             }
             let buffer_arc = Arc::new(child_buffer);
@@ -338,7 +341,8 @@ impl TransfusionManager {
             let child_metadata = Arc::new(child_metadata_struct);
 
             let path = format!("library/breeding/chaotic_child_{}.wav", child_id);
-            if let Err(e) = write_planar_child_wav(&path, &child_buffer, channels) {
+            let sr = parent_a.metadata.sample_rate;
+            if let Err(e) = write_planar_child_wav(&path, &child_buffer, channels, sr) {
                 eprintln!("Chaotic Breeding: failed to write {}: {}", path, e);
             }
             let buffer_arc = Arc::new(child_buffer);
