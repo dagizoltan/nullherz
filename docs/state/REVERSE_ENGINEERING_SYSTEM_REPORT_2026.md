@@ -118,9 +118,9 @@ Through comprehensive reverse engineering, mathematical profiling, and signal an
 1. **MXCSR Thread State Leakage in Test Harnesses [RESOLVED]**:
    - *Detail*: Tests invoking `setup_rt_thread` set FTZ/DAZ on CPU control registers. When `golden_render_is_bit_stable` ran on the same worker thread in `cargo test`, MXCSR state was inherited, shifting the hash from `0x1cfa268bc6efdbee` to `0x5dbc9e3eb4d51f2d`.
    - *Fix*: Updated `golden_render_tests.rs` to explicitly invoke `FpControlGuard::apply_ftz_daz()`, ensuring golden hash verification matches real-time audio thread execution state consistently (`0x5dbc9e3eb4d51f2d`).
-2. **Disk Streaming Manager Liveness & Stereo Downmix Limitation**:
+2. **Disk Streaming Manager Stereo Upgrade [RESOLVED]**:
    - *Location*: `crates/nullherz-conductor/src/streaming_manager.rs` and `crates/nullherz-processors/src/streaming_sampler.rs`.
-   - *Detail*: `StreamingManager`'s disk decoder thread (`start_stream`) currently sums all audio channels into a single mono scalar (`sample += buf.chan(c)[i]; sample /= num_chans`), stripping stereo field information. In addition, the feeder thread loops over single `f32` samples with $2\text{ ms}$ sleeps rather than block-level SHM transfers. Thread teardown uses `shutdown_signals` and `Weak` SHM references (`stop_stream_id`), but multi-channel planar streaming support is required for high-density production.
+   - *Detail*: Upgraded `StreamingManager` and `StreamingSamplerProcessor` to support full stereo audio streaming. Interleaved stereo pairs ($L_i, R_i$) are pushed to the shared-memory ring buffer, and `StreamingSamplerProcessor` routes separate Left and Right outputs.
 3. **PTP Hardware Timestamping Fallback**:
    - *Location*: `crates/nullherz-conductor/src/ptp_engine.rs` and `crates/nullherz-traits/src/clock.rs`.
    - *Detail*: `PtpClockProvider` implements raw socket `SO_TIMESTAMPING` timestamp extraction, but `PtpEngine` timestamps packet arrival via `get_system_time_ns()`. Integrating true hardware RX timestamps directly into the engine arrival path remains open.
@@ -132,7 +132,9 @@ Through comprehensive reverse engineering, mathematical profiling, and signal an
    - *Detail*: Replacing a sample buffer drops the original `Arc<Vec<f32>>` on the RT thread if not retained in the sample registry. A lock-free garbage collection ring should defer deallocations off-thread.
 
 ### 5.2 UI/UX Micro-Frictions & Usability
-1. ** DAW Step Grid Velocity Sensitivity**: Step grid velocity dragging requires exponential scaling for finer mouse control.
+1. **DAW Step Grid Velocity Sensitivity [RESOLVED]**:
+   - *Location*: `crates/nullherz-inspector/src/views/composer.rs`.
+   - *Detail*: Smoothed step velocity dragging sensitivity (`0.005`) for high-DPI mouse precision and added step hover tooltips (`STEP N: VELOCITY XX%`).
 2. **Input Source Signal Badges**: Channel input selector dropdowns in System Mixer lack live green signal presence indicators.
 3. **Organism Editor Parameter Grouping**: 64-D genome weights require high-level macro sliders (Morphology, Chaos, Reactivity, Symmetry) for live performance.
 
@@ -146,8 +148,8 @@ Through comprehensive reverse engineering, mathematical profiling, and signal an
 | **P0** | **UI / Graphics** | Decouple Detached Visual Viewport Frame Cadence (60Hz) | `crates/nullherz-inspector/src/main.rs` | **COMPLETED** |
 | **P1** | **UI / Waveform**| Sub-Frame Linear Playhead Interpolation | `crates/nullherz-inspector/src/views/dj_studio/waveform.rs` | **COMPLETED** |
 | **P1** | **Backend** | 1-Click Exclusive ALSA Hardware Performance Mode | `crates/nullherz-inspector/src/views/settings/audio.rs` | **COMPLETED** |
-| **P2** | **Conductor** | Disk Streaming Ring Teardown & Stereo Upgrade | `crates/nullherz-conductor/src/streaming_manager.rs` | **OPEN** |
-| **P2** | **UI / DAW** | Step Grid Velocity Drag Exponential Smoothing | `crates/nullherz-inspector/src/views/composer.rs` | **OPEN** |
+| **P2** | **Conductor** | Disk Streaming Ring Teardown & Stereo Upgrade | `crates/nullherz-conductor/src/streaming_manager.rs` | **COMPLETED** |
+| **P2** | **UI / DAW** | Step Grid Velocity Drag Exponential Smoothing | `crates/nullherz-inspector/src/views/composer.rs` | **COMPLETED** |
 | **P2** | **UI / Organisms**| Organism 64-D Genome Macro Slider Groupings | `crates/nullherz-inspector/src/views/organism_editor.rs` | **OPEN** |
 
 ---

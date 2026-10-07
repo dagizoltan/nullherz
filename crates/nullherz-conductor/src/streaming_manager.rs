@@ -114,13 +114,15 @@ impl StreamingManager {
                                             break;
                                         }
 
-                                        let mut sample = 0.0;
-                                        for c in 0..num_chans {
-                                            sample += buf.chan(c)[i];
+                                        if num_chans >= 2 {
+                                            current_block.push(buf.chan(0)[i]);
+                                            current_block.push(buf.chan(1)[i]);
+                                        } else if num_chans == 1 {
+                                            let s = buf.chan(0)[i];
+                                            current_block.push(s);
+                                            current_block.push(s);
                                         }
-                                        sample /= num_chans as f32;
 
-                                        current_block.push(sample);
                                         if current_block.len() >= 1024 {
                                             let block_to_send = std::mem::replace(&mut current_block, Vec::with_capacity(1024));
                                             if tx.send(block_to_send).is_err() {
