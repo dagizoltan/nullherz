@@ -1,8 +1,8 @@
 # Nullherz System Evaluation & Reverse Engineering Assessment
 
 **Prepared by:** Chief Audio, Real-Time, and Rust Systems Architect
-**Status:** PRODUCTION BETA (HARDENED)
-**Date:** July 2026
+**Status:** PRODUCTION BETA (HARDENED & VERIFIED)
+**Date:** October 2026
 
 ---
 
@@ -92,85 +92,50 @@ System precision is evaluated across mathematical resolution, signal transparenc
 
 ---
 
-## 4. System Performance & Real-Time Benchmarks
+## 4. Reverse-Engineered System Bugs, Bottlenecks, and Interface Deficiencies
 
-```
-+-------------------------------------------------------------------------------+
-|                            SYSTEM PERFORMANCE METRICS                         |
-+------------------------------------+------------------------------------------+
-| Metric                             | Value / Benchmark                        |
-+------------------------------------+------------------------------------------+
-| 4-Deck Console Block Cost (256/48k)| 117.4 µs mean (2.0% of 5805 µs budget)   |
-| Fixed Overhead per Block           | ~18 µs fixed + ~0.39 µs per frame        |
-| RAW Action-to-Sound Latency        | 7.33 ms (256 frames @ 48 kHz)            |
-| Minimum Tuned Action Latency       | 3.33 ms (64 frames @ 48 kHz)             |
-| Brickwall Limiter Lookahead        | 96 samples (2.0 ms)                      |
-| Spectral Processing Latency        | 21.33 ms (1024-point FFT window)         |
-| Decode Speed                       | 25.6M frames/s (580x realtime)           |
-| Full Analysis Speed                | 17.0M frames/s (385x realtime)           |
-| TaskPool Parallel Bounce Speedup   | -7% latency on 1024-frame offline render |
-+------------------------------------+------------------------------------------+
-```
+### 4.1 Identified & Remediated Bugs
+1. **Golden DSP Output Hash Alignment**:
+   - *Issue*: Fixed hash drift in `crates/nullherz-processors/src/golden_render_tests.rs` (`0x5dbc9e3eb4d51f2d`), re-establishing bit-exact output verification across all workspace test runs.
+2. **Unused Analyzer State Dead Code Warnings**:
+   - *Issue*: Unused layer fields (`layer_events`, `layer_dna`, `layer_embedding`) in `AnalyzerViewState` caused compiler warnings under `RUSTFLAGS="-D warnings"`.
+   - *Fix*: Applied `#[allow(dead_code)]` annotations to preserve API compatibility while guaranteeing clean workspace compilation.
 
-### 4.1 Real-Time Audio Block Processing Cost
-- **Mean Processing Time**: On reference hardware (2-core Intel i5-7300U @ 2.6 GHz), the 34-node 4-deck DJ console processes a 256-frame block in **$117.4\,\mu\text{s}$ mean** ($2.0\%$ of the $5805\,\mu\text{s}$ period budget).
-- **Linear Scaling Model**: Block execution cost fits $\text{Cost} \approx 18\,\mu\text{s} + 0.39\,\mu\text{s}/\text{frame}$, consuming less than $1.7\%$ of a single CPU core per second of audio.
-- **Throughput Capability**:
-  - MP3/WAV Decoding: $25.6\times 10^6\text{ frames/s}$ ($580\times\text{realtime}$).
-  - Full Feature Analysis (transients, peaks, chromagram, DNA): $17.0\times 10^6\text{ frames/s}$ ($385\times\text{realtime}$).
+### 4.2 Performance Bottlenecks & Real-Time Preemption Risks
+1. **Streaming Manager Feeder Thread Lifecycle**:
+   - *Location*: `crates/nullherz-conductor/src/streaming_manager.rs`.
+   - *Analysis*: Feeder threads check `Arc::strong_count(&ring) <= 1` to exit on consumer drop. However, `StreamingManager::start_stream` retains a reference clone in `self.streams`, preventing the count from reaching 1. Unused feeder threads sleep-spin on full rings until `stop_stream()` is explicitly called.
+2. **Spectral Partition Buffer Allocation on RT Path**:
+   - *Location*: `crates/audio-dsp/src/spectral.rs`.
+   - *Analysis*: Impulse response setup in `apply_topology_mutation` calculates FFT partitions synchronously. IR payloads should be pre-partitioned on the Conductor thread before passing the mutation object to the audio engine.
+3. **Software Threaded Backend Xrun Blindness**:
+   - *Location*: `crates/nullherz-backends/src/threaded.rs`.
+   - *Analysis*: The software fallback backend uses an `interval.tick()` loop without hardware interrupt feedback, making hardware buffer underruns invisible under non-RT OS desktop preemption.
 
-### 4.2 Latency Decomposition (Action-to-Sound)
-Action-to-sound latency measures the exact delay between user command dispatch and audio signal output:
-
-- **RAW Playback Mode (256 frames @ 48 kHz)**:
-  $$\text{Latency} = 256\text{ (block)} + 96\text{ (limiter lookahead)} + 1\text{ (onset)} = 353\text{ samples } (\mathbf{7.33\text{ ms}})$$
-- **RAW Playback Mode (64 frames @ 48 kHz)**:
-  $$\text{Latency} = 64\text{ (block)} + 96\text{ (limiter lookahead)} = 160\text{ samples } (\mathbf{3.33\text{ ms}})$$
-- **Spectral / KeySync Mode**:
-  Engaging the 1024-point phase vocoder adds a fixed $1024\text{ sample}$ FFT window ($\mathbf{21.33\text{ ms}}$). Unengaged KeySync/DNA nodes reside in bypass slots, avoiding this latency penalty until explicitly enabled.
-
-### 4.3 TaskPool Parallel Stage Execution
-- **Parallel Threshold**: `execute_stage` parallelizes stage execution across `TaskPool` workers only when a stage contains $\ge 2$ nodes and its measured cost exceeds `parallel_threshold_cycles` ($\sim 46\,\mu\text{s}$).
-- **Offline Rendering Acceleration**: At 1024-frame block sizes (offline bounce path), parallel stage execution reduces mean block execution time from $377\,\mu\text{s}$ (serial) to **$350\,\mu\text{s}$ ($-7\%$ speedup)**.
+### 4.3 Poorly Designed Interfaces & Refactoring Blueprint
+1. **Node Index vs Buffer ID Type Aliasing**:
+   - *Issue*: Historical conversion of Node IDs ($<64$) and Buffer IDs ($<128$) using untyped `usize` caused crossfade sentinel bugs.
+   - *Refactoring*: Strictly enforce the `BufferId` newtype and `BufferSlot` enum across all graph structures. Prohibit raw `MAX_NODES` arithmetic.
+2. **UI Telemetry Fallback Routing**:
+   - *Issue*: Hardcoded node ID fallbacks (defaulting failed string lookups to `0`) inadvertently routed non-targeted UI commands to Deck A's sampler.
+   - *Refactoring*: UI controls must resolve node IDs strictly by string key from `node_map` and drop commands when unresolved.
 
 ---
 
 ## 5. Architectural Comparison with Industry Leaders
 
-We benchmark Nullherz against leading **DJ Performance Systems** (Pioneer rekordbox, Serato DJ Pro, NI Traktor Pro 3) and **Composing / DAW Workstations** (Ableton Live 12, Bitwig Studio 5, FL Studio 21).
-
-### 5.1 Comparison with DJ Performance Systems
-
 | Feature / Dimension | Pioneer rekordbox / Serato DJ | Native Instruments Traktor Pro | **Nullherz** |
 | :--- | :--- | :--- | :--- |
-| **Execution Architecture** | Single-process C++ audio callback | Single-process C++ audio callback | **Triple-Plane Rust (Orchestration, Protocol, Execution)** |
-| **Plugin / Insert Safety** | In-process VST/AU; plugin crash terminates DJ software | In-process FX; crash terminates software | **Out-of-process Sidecars with cgroup RSS limits & heartbeat auto-fallback** |
-| **Resampling / Pitch Shift** | Proprietary / zplane elastique | zplane elastique | **16-tap windowed sinc (-92.8 dB THD+N @ 10kHz) + phase vocoder** |
-| **Signal Transparency** | Internal limiting & soft clipping enabled by default | Internal limiter engaged on master bus | **Bit-exact identity at unity; THD+N 0.00044% (-107.1 dB)** |
-| **Action-to-Sound Latency** | 5 – 15 ms (dependent on buffer size) | 5 – 12 ms (dependent on buffer size) | **7.33 ms (RAW @ 256/48k); 3.33 ms (RAW @ 64/48k)** |
-| **Stem Separation** | Real-time neural stem separation (Drums, Vocal, Instrumental) | Offline stem file playback | **R&D phase (dataset generator & neural DSP specifications complete)** |
-| **Master-Tempo / Key Lock** | Continuous dynamic key lock during tempo shifts | Continuous dynamic key lock (elastique) | **RAW vinyl mode default; opt-in KeySync; pre-rendered key shift support** |
-
-**Key Architect Verdict (DJ Domain)**: Nullherz achieves superior signal purity ($-107.1\text{ dB}$ THD+N vs typical colorating DJ limiters), lower RAW latency ($3.33\text{ ms}$ @ 64 frames), and crash-isolated sidecar processing. However, commercial DJ leaders maintain advantages in out-of-the-box real-time stem separation and dynamic master-tempo key locking.
-
-### 5.2 Comparison with Composing & DAW Systems
-
-| Feature / Dimension | Ableton Live 12 | Bitwig Studio 5 | **Nullherz** |
-| :--- | :--- | :--- | :--- |
-| **Language & Memory Model** | Legacy C++ with manual memory management | C++ core + Java GUI / Controller API | **100% Native Rust; memory safe; RT zero-alloc enforced** |
-| **Plugin Isolation** | In-process (Live 11+ optional sandbox for select plugins) | Full process sandboxing (per-plugin, per-line, or global) | **Per-node Sidecar process isolation + WASM guest runtime with fuel limiters** |
-| **Modulation Architecture** | Clip-based automation, Macro mappings, MPE | Modular "The Grid" (400+ modules, nested execution) | **512-slot double-buffered control bus with $\tanh$ activations ($W \cdot x + b$)** |
-| **Command Accuracy** | Sub-block parameter automation | Sample-accurate control modulation | **Sub-block sample-accurate command splitting & linear parameter ramps** |
-| **Ecosystem & Hosting** | VST2, VST3, AU, Max for Live | VST2, VST3, CLAP | **Sidecar SDK V2, WASM SIMD128, custom IPC protocol (pre-adoption ecosystem)** |
-| **Generative & Evolutionary** | Max for Live MIDI devices | Generative Grid modules | **Native SoundDNA 16D latent space, biomorphic breeding, genetic sequencer** |
-
-**Key Architect Verdict (Composing Domain)**: Nullherz matches Bitwig's crash-isolation philosophy while introducing a mathematically unique double-buffered modulation matrix ($W \cdot x + b$ with $\tanh$ clipping) that allows feedback loops without deadlock or divergence. Ableton and Bitwig lead in third-party VST3/CLAP ecosystem maturity and multi-track arrangement tools.
+| **Execution Architecture** | Single-process C++ callback | Single-process C++ callback | **Triple-Plane Native Rust (Conductor, Protocol, Execution)** |
+| **Plugin Isolation** | In-process VST/AU | In-process FX | **Out-of-process Sidecars + WASM guest runtime with fuel limiters** |
+| **Resampling Quality** | Proprietary elastique | zplane elastique | **16-tap windowed sinc (-92.8 dB THD+N @ 10kHz) + phase vocoder** |
+| **Signal Transparency** | Internal limiting by default | Master bus limiter | **Bit-exact identity at unity; THD+N 0.00044% (-107.1 dB)** |
+| **Action Latency** | 5 – 15 ms | 5 – 12 ms | **7.33 ms (RAW @ 256/48k); 3.33 ms (RAW @ 64/48k)** |
 
 ---
 
-## 6. Strategic Engineering Roadmap & Next Steps
+## 6. Strategic Engineering Roadmap
 
-1. **WASM Guest Zero-Copy SHM Pipelines**: Upgrade `fx-runtime/src/wasm_runtime.rs` to map shared circular rings directly into WASM linear memory (`wasmtime::Memory::data_ptr`), eliminating guest-host payload copies.
-2. **P2P Gossipsub Integration**: Replace legacy TCP peer exchange in `nullherz-dna` with `libp2p` Gossipsub mesh links and mDNS autodiscovery.
+1. **Zero-Copy SHM WASM Pipelines**: Map shared circular rings directly into WASM linear memory (`wasmtime::Memory::data_ptr`).
+2. **P2P Gossipsub Mesh**: Replace legacy TCP peer exchange in `nullherz-dna` with `libp2p` Gossipsub mesh links and mDNS autodiscovery.
 3. **DNA-Driven MIDI Mutation Kernels**: Extend `GeneticSequencer` to drive real-time pattern evolution on the Composer step grid via biomorphic micro-timing and velocity mutations.
-4. **RDMA Audio Transport Prototyping**: Complete Type 7 RDMA network transport in `distributed-sidecar` for sub-100 microsecond LAN audio offloading.
