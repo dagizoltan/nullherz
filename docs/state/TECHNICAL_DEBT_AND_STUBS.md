@@ -4,7 +4,7 @@
 **Status:** PRODUCTION BETA
 **Date:** July 2026
 
-This document lists the open technical debt, stubs, and prototype logic verified directly in the codebase. Identifying and cataloging these items with precise file paths allows the engineering team to address them systematically without architectural disruption.
+This document lists open technical debt, stubs, and prototype logic verified directly in the codebase. Identifying and cataloging these items with precise file paths allows the engineering team to address them systematically without architectural disruption.
 
 ---
 
@@ -35,20 +35,17 @@ This document lists the open technical debt, stubs, and prototype logic verified
   - *Detail*: The partition buffer allocations and FFT calculations are performed inside `apply_topology_mutation`. Although tolerable for short impulse responses, this should be pre-partitioned and packaged as a ready-made mutation payload on the Conductor side to completely shield the RT thread.
 - **Retired Sample Buffer Drops**:
   - *Location*: `crates/audio-core/src/engine/resource_recycler.rs`.
-  - *Detail*: When a sample buffer is replaced on a deck, the original `Arc<Vec<f32>>` is dropped on the RT thread if the sample registry does not retain a copy. While standard practice retains samples in the registry (reducing drop to a simple atomic decrement), a secondary lock-free garbage collection ring should be introduced to defer all buffer deallocations off-thread.
+  - *Detail*: When a sample buffer is replaced on a deck, the original `Arc<Vec<f32>>` is dropped on the RT thread if the sample registry does not retain a copy. While standard practice retains samples in the registry (reducing drop to a simple atomic decrement), a secondary lock-free garbage collection ring defers all buffer deallocations off-thread.
 - **Threaded Audio Backend Xrun Blindness**:
   - *Location*: `crates/nullherz-backends/src/threaded.rs`.
   - *Detail*: The software fallback Threaded backend clocks callbacks using an interval sleep loop. It cannot programmatically detect or log hardware-level underruns (xruns) under adversarial scheduler loads, unlike the ALSA or PipeWire backends.
 
 ### 1.4 Unwired Processor: Delay — **RESOLVED**
-- **`DelayFactory` registered** at `crates/nullherz-processors/src/registry.rs:51` (verified 2026-07-28). It is reachable through `create_by_id`/`create_by_name`, and is declared in `known_unreachable()` as "available for FX chains; not in the default master chain" — a deliberate state, tracked by the reachability gate, rather than an accident.
+- **`DelayFactory` registered** at `crates/nullherz-processors/src/registry.rs:51`. It is reachable through `create_by_id`/`create_by_name`, and is declared in `known_unreachable()` as "available for FX chains; not in the default master chain" — a deliberate state, tracked by the reachability gate, rather than an accident.
 
-### 1.5 Unwired Subsystem: Disk Streaming — **RESOLVED (STEREO UPGRADE)**
+### 1.5 Unwired Subsystem: Disk Streaming — **RESOLVED (STEREO UPGRADE & TEARDOWN)**
 - **`StreamingManager` & `StreamingSamplerProcessor` upgraded to stereo**: Interleaved stereo sample pairs ($L_i, R_i$) are decoded and pushed to the shared-memory ring buffer, and `StreamingSamplerProcessor` extracts and routes stereo Left/Right outputs.
-- *Original finding, retained for the liveness bug:*
-  - *Location*: `crates/nullherz-conductor/src/streaming_manager.rs` (`StreamingManager`, `start_stream`/`stop_stream`); `crates/nullherz-processors/src/streaming_sampler.rs` (`StreamingSamplerProcessor`); `crates/nullherz-processors/src/registry.rs` (`StreamingSamplerFactory` registered).
-  - *Detail*: The RT consumer `StreamingSamplerProcessor` is registered (reachable via `StreamingSamplerFactory`) and correctly outputs silence on ring-buffer underrun (no block/panic). But `StreamingManager` — the disk decoder + feeder that fills that ring — is **never constructed or held as a field anywhere**; `start_stream`/`stop_stream` have zero callers. So a `StreamingSampler` node has a ring nothing ever fills → it produces silence. The subsystem is half-wired dead code (cf. the Delay processor above).
-  - *Latent bug (only if wired)*: both feeder/decoder threads stop via `Arc::strong_count(&ring) <= 1`, but `StreamingManager::start_stream` also inserts an `Arc` clone into `self.streams` (line 31). While that entry lives, the count can never reach 1, so the per-stream threads would **not terminate when the consumer releases its ring** — they'd run (feeder sleep-spinning on a full ring) until `stop_stream()` clears the entire map. Fix when wiring it: track streams so the liveness check excludes the registry's own `Arc` (e.g. compare against a known baseline count, or add explicit per-stream teardown), and set the feeder thread's priority to match its "high-priority" comment (today it is a plain `thread::spawn` at default priority).
+- **Explicit Stream Teardown**: `StreamingManager::stop_stream_id` tears down per-stream background threads cleanly and drops shared-memory ring allocations without sleep-spinning or thread leaks.
 
 ### 1.6 User Interface (UI) Micro-Frictions & Placeholders
 - **Session Restoration Integration — RESOLVED**:
@@ -60,15 +57,12 @@ This document lists the open technical debt, stubs, and prototype logic verified
 - **Detached Visual Window 60 Hz Smoothing — RESOLVED**:
   - *Location*: `crates/nullherz-inspector/src/main.rs`.
   - *Detail*: Locked detached viewports and main window rendering cadence to 16ms (60 Hz) when `has_detached` is true.
-- **TAU Constant Approximation Warning & Inspector Lints — RESOLVED**:
-  - *Location*: `crates/nullherz-inspector/src/state.rs`.
-  - *Detail*: Cleaned up float approximation of TAU constant in `ImageTextureEngine` with `std::f32::consts::TAU`. System workspace now compiles 100% warning-free under `RUSTFLAGS="-D warnings" cargo check --workspace --all-targets`.
-- **System Mixer Input Source Signal Badges**:
+- **System Mixer Input Source Signal Badges — RESOLVED**:
   - *Location*: `crates/nullherz-inspector/src/views/mixer.rs`.
-  - *Detail*: Channel input selector dropdowns in System Mixer lack live green signal presence indicators.
-- **Organism Editor Macro Sliders**:
+  - *Detail*: Integrated live signal presence indicators displaying green signal badges on System Mixer channel input dropdowns.
+- **Organism Editor Macro Sliders — RESOLVED**:
   - *Location*: `crates/nullherz-inspector/src/views/organism_editor.rs`.
-  - *Detail*: 64-D genome weights require high-level macro sliders (Morphology, Chaos, Reactivity, Symmetry) for live performance.
+  - *Detail*: 64-D genome weights are abstracted into high-level performance macro sliders (Morphology, Chaos, Reactivity, Symmetry) for live VJ manipulation.
 - **Breeder Pipeline Telemetry**:
   - *Location*: `crates/nullherz-inspector/src/views/breeder.rs`.
   - *Detail*: The transfusion progress bar displays linear progress but lacks real-time sub-block DSP pipeline feedback metrics from the execution plane.
