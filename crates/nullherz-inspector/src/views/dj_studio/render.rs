@@ -5,30 +5,34 @@ use audio_core::Telemetry;
 use super::waveform;
 
 pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>) {
-    if app.decks.focused_deck >= 4 {
-        app.decks.focused_deck = 0;
-    }
     let theme = app.theme;
 
-    render_header(ui, telemetry, &theme);
+    // Deck Bank Offset (0 for Decks A-D, 4 for Decks E-H)
+    let deck_bank_offset = if app.decks.focused_deck >= 4 { 4 } else { 0 };
+
+    render_header(app, ui, telemetry, &theme);
     ui.add_space(theme.space_xs);
 
     // Calculate space for 4 full waveform lanes
     let waveform_section_h = ui.available_height().max(180.0);
     let spacing_h = 2.0;
-    let lane_h = ((waveform_section_h - spacing_h * 3.0) / 4.0).max(35.0);
+    let base_lane_h = ((waveform_section_h - spacing_h * 3.0) / 4.0).max(35.0);
 
     ui.vertical(|ui| {
-        for i in 0..4 {
-            render_waveform_lane(app, ui, i, lane_h, telemetry);
-            if i < 3 {
+        for slot in 0..4 {
+            let deck_idx = deck_bank_offset + slot;
+            let is_stem_expanded = app.mixer.stem_controls_expanded[deck_idx];
+            let lane_h = if is_stem_expanded { base_lane_h + 110.0 } else { base_lane_h };
+
+            render_waveform_lane(app, ui, deck_idx, lane_h, telemetry);
+            if slot < 3 {
                 ui.add_space(spacing_h);
             }
         }
     });
 }
 
-fn render_header(ui: &mut Ui, telemetry: &Option<Telemetry>, theme: &nullherz_ui_hal::Theme) {
+fn render_header(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>, theme: &nullherz_ui_hal::Theme) {
     Frame::none()
         .fill(theme.bg_surface)
         .stroke(theme.border_stroke)
@@ -37,6 +41,18 @@ fn render_header(ui: &mut Ui, telemetry: &Option<Telemetry>, theme: &nullherz_ui
         .show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.label(RichText::new("PERFORMANCE DECK MATRIX").strong().size(theme.type_caption).color(theme.text_secondary));
+
+                ui.add_space(theme.space_md);
+
+                // Deck Bank Tabs (Decks A-D vs Decks E-H)
+                let is_bank_1 = app.decks.focused_deck < 4;
+                if ui.selectable_label(is_bank_1, RichText::new("DECKS A–D").strong().size(theme.type_caption)).clicked() {
+                    app.decks.focused_deck = 0;
+                }
+                if ui.selectable_label(!is_bank_1, RichText::new("DECKS E–H").strong().size(theme.type_caption)).clicked() {
+                    app.decks.focused_deck = 4;
+                }
+
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                     if let Some(t) = telemetry {
                         ui.label(RichText::new("BPM").size(theme.type_caption).color(theme.text_secondary));
