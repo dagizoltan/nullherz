@@ -456,6 +456,42 @@ pub fn prewarm() {
     let _ = table();
 }
 
+/// Resample a planar or mono audio buffer from `source_rate` to `target_rate` using the 16-tap Kaiser sinc table.
+/// Returns the resampled planar vector and output frame count per channel.
+pub fn resample_buffer(input: &[f32], channels: usize, source_rate: u32, target_rate: u32) -> (Vec<f32>, usize) {
+    if source_rate == 0 || target_rate == 0 || source_rate == target_rate || input.is_empty() {
+        let frames = input.len() / channels.max(1);
+        return (input.to_vec(), frames);
+    }
+
+    let channels = channels.max(1);
+    let in_frames = input.len() / channels;
+    if in_frames == 0 {
+        return (Vec::new(), 0);
+    }
+
+    let rate_ratio = source_rate as f64 / target_rate as f64;
+    let out_frames = (in_frames as f64 / rate_ratio).round() as usize;
+    if out_frames == 0 {
+        return (Vec::new(), 0);
+    }
+
+    let stretch = (source_rate as f32 / target_rate as f32).max(1.0);
+    let table = table();
+
+    let mut out = Vec::with_capacity(out_frames * channels);
+    for c in 0..channels {
+        let start = c * in_frames;
+        let plane = &input[start..start + in_frames];
+        for i in 0..out_frames {
+            let t = i as f64 * rate_ratio;
+            out.push(table.sample(plane, t, stretch));
+        }
+    }
+
+    (out, out_frames)
+}
+
 /// Modified Bessel function of the first kind, order 0 — the Kaiser window's
 /// shape term. The series converges quickly for the beta in use.
 fn bessel_i0(x: f64) -> f64 {
