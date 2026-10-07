@@ -118,9 +118,9 @@ Through comprehensive reverse engineering, mathematical profiling, and signal an
 1. **MXCSR Thread State Leakage in Test Harnesses [RESOLVED]**:
    - *Detail*: Tests invoking `setup_rt_thread` set FTZ/DAZ on CPU control registers. When `golden_render_is_bit_stable` ran on the same worker thread in `cargo test`, MXCSR state was inherited, shifting the hash from `0x1cfa268bc6efdbee` to `0x5dbc9e3eb4d51f2d`.
    - *Fix*: Updated `golden_render_tests.rs` to explicitly invoke `FpControlGuard::apply_ftz_daz()`, ensuring golden hash verification matches real-time audio thread execution state consistently (`0x5dbc9e3eb4d51f2d`).
-2. **Disk Streaming Manager Liveness & Downmix Limitation**:
+2. **Disk Streaming Manager Liveness & Stereo Downmix Limitation**:
    - *Location*: `crates/nullherz-conductor/src/streaming_manager.rs` and `crates/nullherz-processors/src/streaming_sampler.rs`.
-   - *Detail*: `StreamingManager` currently downmixes input audio to mono and pushes single samples with $2\text{ ms}$ thread sleeps. Furthermore, stream worker threads stop via `Arc::strong_count(&ring) <= 1`, but `start_stream()` retains an `Arc` reference in `self.streams`, preventing thread teardown when consumers drop rings.
+   - *Detail*: `StreamingManager`'s disk decoder thread (`start_stream`) currently sums all audio channels into a single mono scalar (`sample += buf.chan(c)[i]; sample /= num_chans`), stripping stereo field information. In addition, the feeder thread loops over single `f32` samples with $2\text{ ms}$ sleeps rather than block-level SHM transfers. Thread teardown uses `shutdown_signals` and `Weak` SHM references (`stop_stream_id`), but multi-channel planar streaming support is required for high-density production.
 3. **PTP Hardware Timestamping Fallback**:
    - *Location*: `crates/nullherz-conductor/src/ptp_engine.rs` and `crates/nullherz-traits/src/clock.rs`.
    - *Detail*: `PtpClockProvider` implements raw socket `SO_TIMESTAMPING` timestamp extraction, but `PtpEngine` timestamps packet arrival via `get_system_time_ns()`. Integrating true hardware RX timestamps directly into the engine arrival path remains open.
