@@ -135,9 +135,12 @@ pub struct AnalyzerViewState {
     pub layer_transient: bool,
     pub layer_stereo: bool,
     pub layer_energy: bool,
+    #[allow(dead_code)]
     pub layer_events: bool,
+    #[allow(dead_code)]
     pub layer_dna: bool,
     pub layer_collision: bool,
+    #[allow(dead_code)]
     pub layer_embedding: bool,
 
     pub ab_enabled: bool,
