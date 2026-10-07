@@ -66,6 +66,7 @@ This document lists the open technical debt, stubs, and prototype logic verified
 
 ## 2. Resolved Architectural Hardenings (Kept for Context)
 
+- **MXCSR FTZ/DAZ Test Harness State Synchronization**: Resolved thread-local floating-point control register state leakage across test runners. `golden_render_tests.rs` now explicitly applies `FpControlGuard::apply_ftz_daz()`, ensuring golden hash verification matches real-time audio thread execution state consistently (`0x5dbc9e3eb4d51f2d`).
 - **O(1) Sample Deck Loading**: Resolved track-load heap clones. `SamplerProcessor` has been refactored to adopt shared `Arc` containers instead of deep-cloning sample buffers, preventing large allocations on the RT thread hot-path.
 - **PTP Path-Delay Calculation**: Refactored `PtpEngine` from a fixed 1 ms assumption to an active four-timestamp round-trip measurement with EMA smoothing and a 100 ms plausibility filter.
 - **Database Mutex Contention**: Migrated track analysis saves to a batched, single-transaction database commit pattern inside `AnalysisWorker` (`crates/nullherz-conductor/src/analysis_worker.rs`), reducing lock contention on `library.redb`.

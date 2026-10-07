@@ -38,6 +38,7 @@ Core technical specifications and engineering principles.
 
 ## 📊 [Current State & Health](./state/)
 Tracking of system maturity and technical debt.
+- [System Architecture & Reverse Engineering Master Report (2026)](./state/REVERSE_ENGINEERING_SYSTEM_REPORT_2026.md) — **comprehensive audit**: triple-plane architecture, sound design audit, audio DSP benchmarks, and issue inventory
 - [Feature Matrix](./state/FEATURE_MATRIX.md) — a ✅ here means *reachable by a user*, not *a test passes*; the gate is `crates/nullherz-conductor/tests/reachability_gate_test.rs`
 - [Technical Debt & Stubs Log](./state/TECHNICAL_DEBT_AND_STUBS.md)
 - [Reverse Engineering Evaluation](./state/REVERSE_ENGINEERING_EVALUATION.md)

@@ -1,7 +1,7 @@
 # Nullherz System Feature Matrix (Stage 6: Evolutionary Intelligence)
 
 **Current State:** see [IMPLEMENTATION_ROADMAP_2026_07.md](../roadmap/IMPLEMENTATION_ROADMAP_2026_07.md) for current phase progress. A ✅ below means **a user can reach it in the application**, verified by `crates/nullherz-conductor/tests/reachability_gate_test.rs`.
-**Last Updated:** July 2026 — verified against code and hardware benchmark suites (see [ARCHITECTURE.md](../system/ARCHITECTURE.md) and [REVERSE_ENGINEERING_EVALUATION.md](./REVERSE_ENGINEERING_EVALUATION.md)).
+**Last Updated:** July 2026 — verified against code and hardware benchmark suites (see [ARCHITECTURE.md](../system/ARCHITECTURE.md) and [REVERSE_ENGINEERING_SYSTEM_REPORT_2026.md](./REVERSE_ENGINEERING_SYSTEM_REPORT_2026.md)).
 
 ---
 
