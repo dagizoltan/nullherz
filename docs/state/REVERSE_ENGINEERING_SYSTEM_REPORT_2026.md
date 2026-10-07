@@ -21,7 +21,7 @@ Nullherz is a next-generation real-time audio workstation, DJ performance consol
        [ Execution Plane ] (audio-core, audio-dsp, nullherz-processors)
 ```
 
-Through comprehensive reverse engineering, mathematical profiling, and signal analysis, this report evaluates system precision, signal purity, real-time determinism, UI/UX ergonomics, and architectural alignment against industry standards in DJ performance (Pioneer rekordbox, Serato DJ, Traktor Pro) and production DAWs (Ableton Live, Bitwig Studio, FL Studio).
+Through comprehensive reverse engineering, mathematical profiling, and signal analysis across `crates/`, `sidecars/`, and `src/`, this report evaluates system precision, signal purity, real-time determinism, UI/UX ergonomics, and architectural alignment against industry standards in DJ performance (Pioneer rekordbox, Serato DJ, Traktor Pro) and production DAWs (Ableton Live, Bitwig Studio, FL Studio).
 
 ---
 
@@ -30,7 +30,7 @@ Through comprehensive reverse engineering, mathematical profiling, and signal an
 ### 2.1 Orchestration Plane (`nullherz-conductor`)
 - **Declarative Topological Graph Compilation**: Graph topologies are compiled off the audio thread using Kahn's topological sorting algorithm inside `TopologyManager`. Commits execute on the real-time audio thread via $O(1)$ atomic pointer swaps (`SetTopology`).
 - **Asynchronous Hydration & Analysis Pipeline**: Heavy audio decoding (`symphonia`) and SoundDNA extraction (transients, BPM, key, chromagram) execute on background worker threads (`hydration-<id>`, `analysis_worker`), keeping the main orchestrator tick loop non-blocking (mean tick latency $< 164\,\mu\text{s}$).
-- **Transactional Database Isolation**: Transactional operations (`library.redb` and SQLite `library.db`) are isolated to worker threads to prevent mutex contention on real-time control paths.
+- **Transactional Database Isolation**: Relational metadata and asset manifests (`storage/db/library.db` via SQLite `rusqlite` bundled) and zero-copy binary blobs (`storage/db/library.redb` via `redb`) are isolated to worker threads to prevent mutex contention on real-time control paths.
 
 ### 2.2 Protocol Plane (`ipc-layer`, `nullherz-traits`)
 - **Lock-Free Ring Buffers**: Shared-memory (`shm_open`) and in-process SPSC/MPSC lock-free ring buffers (`ShmRingBuffer`, `RingBuffer`, `MpscRingBuffer`) transport audio blocks, MIDI events, and commands without heap allocation or mutex locking.
@@ -43,7 +43,7 @@ Through comprehensive reverse engineering, mathematical profiling, and signal an
 - **Sub-Block Command Dispatch**: Commands are executed at sub-block sample timestamps (`sub_block_offset`), enabling sample-accurate parameter automation and zipper-free linear ramping.
 
 ### 2.4 Extensibility & Sidecar Ecosystem (`sidecar-sdk`, `fx-runtime`)
-- **Sidecar Modules**: Audio Instruments, Audio Inserts, Visual Generators, and Visual Inserts are unified into the single `SidecarModule` primitive.
+- **Unified Sidecar Modules**: Audio Instruments, Audio Inserts, Visual Generators, and Visual Inserts are unified into the single `SidecarModule` primitive.
 - **Out-of-Process & WASM Sandboxing**: Process isolation via cgroups with RSS memory limits and WASM execution via `wasmtime` with fuel resource limiters protect the main audio engine from third-party crashes.
 
 ### 2.5 User Interface & HAL (`nullherz-inspector`, `nullherz-ui-hal`)
@@ -58,26 +58,26 @@ Through comprehensive reverse engineering, mathematical profiling, and signal an
 - **Strengths**: High-density stacked scrolling multi-band waveforms across 4 deck lanes allow exact visual phase alignment. Integrated 3-band isolators (`DjIsolator`), roll/delay inserts, KeySync pitch shifters, and 12-stem demixing isolator matrix.
 - **Friction Points Identified**:
   1. *Playhead Needle Micro-Jitter*: Raw snapshot telemetry caused visual needle stutter. *(RESOLVED: Sub-frame linear playhead interpolation added in `waveform.rs`)*.
-  2. *Hot Cue Tactile Feedback*: Hot cue markers (1–8) on deck headers required immediate visual flash confirmation upon MIDI trigger.
-  3. *Stem Matrix Expansion Ergonomics*: Opening the 12-stem isolator matrix expanded deck height; dynamic lane height scaling was required to prevent canvas clipping.
+  2. *Hot Cue Tactile Feedback*: Hot cue markers (1–8) on deck headers required immediate visual flash confirmation upon MIDI trigger. *(RESOLVED: Instant visual badge highlighting and wave marker sync verified)*.
+  3. *Stem Matrix Expansion Ergonomics*: Opening the 12-stem isolator matrix expanded deck height; dynamic lane height scaling was required to prevent canvas clipping. *(RESOLVED: Dynamic lane scaling implemented)*.
 
 ### 3.2 DAW Composer & Sequencer Grid
 - **Strengths**: 1:1 synchronization between arrangement grid tracks and System Mixer channels. Velocity editing on active step grid cells via vertical drag with step percentage tooltips.
 - **Friction Points Identified**:
-  1. *Velocity Drag Sensitivity*: Dragging step velocity bars felt overly sensitive on high-DPI mice. *(RESOLVED: Exponential scaling and numerical tooltips added in `composer.rs`)*.
+  1. *Velocity Drag Sensitivity*: Dragging step velocity bars felt overly sensitive on high-DPI mice. *(RESOLVED: Exponential scaling `0.005` and numerical tooltips added in `composer.rs`)*.
   2. *Mini-Waveform Clip Indicator*: Clips with pending peak analysis showed blank boxes without a distinct loading spinner.
 
 ### 3.3 System Mixer & Sampler Studio
 - **Strengths**: Standardized 78px channel strips with 4px VU meters, dual EQ parameter knobs, and sortable insert FX racks across main channels, subchannels, and master strips.
 - **Friction Points Identified**:
-  1. *Input Routing Visual Feedback*: Input source dropdown selectors lacked live signal presence badges (active audio signal presence).
+  1. *Input Routing Visual Feedback*: Input source dropdown selectors lacked live signal presence badges (active audio signal presence). *(RESOLVED: Real-time peak level signal indicators integrated into selector dropdowns)*.
   2. *Sampler Input Monitor Level*: Replay playhead needle required high-contrast timecode alignment during active sampling.
 
 ### 3.4 Visual Organisms & Generative Surface
 - **Strengths**: 64-neuron Spiking Neural Networks (SNN) driven by a 20-parameter `AudioNervousSystem` driving Milkdrop-style `PixelFeedbackEngine` RGBA framebuffers.
 - **Friction Points Identified**:
   1. *Detached Window Frame Cadence*: Secondary VJ windows dropped frame rate when main window lost focus. *(RESOLVED: Locked to 16ms / 60 Hz in `main.rs`)*.
-  2. *Organism Editor Parameter Complexity*: Manipulating 64 individual float genes live during performance is cumbersome; macro sliders (Morphology, Chaos, Reactivity, Symmetry) improve usability.
+  2. *Organism Editor Parameter Complexity*: Manipulating 64 individual float genes live during performance is cumbersome; macro sliders (Morphology, Chaos, Reactivity, Symmetry) improve usability. *(RESOLVED: High-level macro control parameter abstraction wired to genome vectors)*.
 
 ---
 
@@ -130,7 +130,7 @@ Through comprehensive reverse engineering, mathematical profiling, and signal an
    - *Detail*: Spectral FFT kernels assume power-of-two block sizes $\le 1024$. Arbitrary non-power-of-two buffer sizes require overlap-add buffering wrappers.
 5. **Retired Sample Buffer Drops on RT Thread**:
    - *Location*: `crates/audio-core/src/engine/resource_recycler.rs`.
-   - *Detail*: Replacing a sample buffer drops the original `Arc<Vec<f32>>` on the RT thread if not retained in the sample registry. A lock-free garbage collection ring should defer deallocations off-thread.
+   - *Detail*: Replacing a sample buffer drops the original `Arc<Vec<f32>>` on the RT thread if not retained in the sample registry. A lock-free garbage collection ring defers deallocations off-thread.
 
 ### 5.2 UI/UX Micro-Frictions & Usability
 1. **DAW Step Grid Velocity Sensitivity [RESOLVED]**:
@@ -139,8 +139,12 @@ Through comprehensive reverse engineering, mathematical profiling, and signal an
 2. **Detached Visual Window 60 Hz Smoothing [RESOLVED]**:
    - *Location*: `crates/nullherz-inspector/src/main.rs`.
    - *Detail*: Locked detached viewports and main window rendering cadence to 16ms (60 Hz) when `has_detached` is true.
-3. **Input Source Signal Badges**: Channel input selector dropdowns in System Mixer lack live green signal presence indicators.
-4. **Organism Editor Parameter Grouping**: 64-D genome weights require high-level macro sliders (Morphology, Chaos, Reactivity, Symmetry) for live performance.
+3. **Input Source Signal Badges [RESOLVED]**:
+   - *Location*: `crates/nullherz-inspector/src/views/mixer.rs`.
+   - *Detail*: Channel input selector dropdowns in System Mixer render live green signal presence indicators based on peak signal amplitude.
+4. **Organism Editor Parameter Grouping [RESOLVED]**:
+   - *Location*: `crates/nullherz-inspector/src/views/organism_editor.rs`.
+   - *Detail*: 64-D genome weights are grouped under high-level macro sliders (Morphology, Chaos, Reactivity, Symmetry) for live VJ performance manipulation.
 
 ---
 
@@ -154,7 +158,9 @@ Through comprehensive reverse engineering, mathematical profiling, and signal an
 | **P1** | **Backend** | 1-Click Exclusive ALSA Hardware Performance Mode | `crates/nullherz-inspector/src/views/settings/audio.rs` | **COMPLETED** |
 | **P2** | **Conductor** | Disk Streaming Ring Teardown & Stereo Upgrade | `crates/nullherz-conductor/src/streaming_manager.rs` | **COMPLETED** |
 | **P2** | **UI / DAW** | Step Grid Velocity Drag Exponential Smoothing | `crates/nullherz-inspector/src/views/composer.rs` | **COMPLETED** |
-| **P2** | **UI / Organisms**| Organism 64-D Genome Macro Slider Groupings | `crates/nullherz-inspector/src/views/organism_editor.rs` | **OPEN** |
+| **P2** | **UI / Organisms**| Organism 64-D Genome Macro Slider Groupings | `crates/nullherz-inspector/src/views/organism_editor.rs` | **COMPLETED** |
+| **P3** | **Clock / Network**| Native Hardware RX Socket Timestamping in PTP Engine | `crates/nullherz-conductor/src/ptp_engine.rs` | **OPEN** |
+| **P3** | **DSP / Spectral** | Non-Power-of-Two Arbitrary Buffer Overlap-Add Wrapper | `crates/nullherz-processors/src/spectral.rs` | **OPEN** |
 
 ---
 *Approved by Chief Sound Designer & Audio Software Rust Architect*
