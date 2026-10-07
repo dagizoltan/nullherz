@@ -39,7 +39,7 @@ Through comprehensive reverse engineering, mathematical profiling, and signal an
 
 ### 2.3 Execution Plane (`audio-core`, `audio-dsp`, `nullherz-processors`)
 - **Monomorphized Devirtualized Execution**: `AudioEngine<K: ProcessingKernel>` uses monomorphized, devirtualized static dispatch for zero-vtable overhead.
-- **Zero-Allocation Hot Path**: Enforced via `nullherz_traits::test_kit::rt_alloc` counting allocator. `process()` performs 0 heap allocations during steady-state processing across all 46 core DSP processors.
+- **Zero-Allocation Hot Path**: Enforced via `nullherz_traits::test_kit::rt_alloc` counting allocator. `process()` performs 0 heap allocations during steady-state processing across all core DSP processors.
 - **Sub-Block Command Dispatch**: Commands are executed at sub-block sample timestamps (`sub_block_offset`), enabling sample-accurate parameter automation and zipper-free linear ramping.
 
 ### 2.4 Extensibility & Sidecar Ecosystem (`sidecar-sdk`, `fx-runtime`)
@@ -55,20 +55,20 @@ Through comprehensive reverse engineering, mathematical profiling, and signal an
 ## 3. Chief Sound Designer Audit: UX, Ergonomics & Sound Mechanics
 
 ### 3.1 DJ Studio & Console View
-- **Strengths**: High-density stacked scrolling multi-band waveforms across 4 deck lanes allow exact visual phase alignment. Integrated 3-band isolators (`DjIsolator`), roll/delay inserts, and KeySync pitch shifters.
+- **Strengths**: High-density stacked scrolling multi-band waveforms across 4 deck lanes allow exact visual phase alignment. Integrated 3-band isolators (`DjIsolator`), roll/delay inserts, KeySync pitch shifters, and 12-stem demixing isolator matrix.
 - **Friction Points Identified**:
   1. *Playhead Needle Micro-Jitter*: Raw snapshot telemetry caused visual needle stutter. *(RESOLVED: Sub-frame linear playhead interpolation added in `waveform.rs`)*.
   2. *Hot Cue Tactile Feedback*: Hot cue markers (1–8) on deck headers required immediate visual flash confirmation upon MIDI trigger.
   3. *Stem Matrix Expansion Ergonomics*: Opening the 12-stem isolator matrix expanded deck height; dynamic lane height scaling was required to prevent canvas clipping.
 
 ### 3.2 DAW Composer & Sequencer Grid
-- **Strengths**: 1:1 synchronization between arrangement grid tracks and System Mixer channels. Velocity editing on active step grid cells via vertical drag.
+- **Strengths**: 1:1 synchronization between arrangement grid tracks and System Mixer channels. Velocity editing on active step grid cells via vertical drag with step percentage tooltips.
 - **Friction Points Identified**:
-  1. *Velocity Drag Sensitivity*: Dragging step velocity bars felt overly sensitive on high-DPI mice; needs exponential scaling and numerical tooltips.
+  1. *Velocity Drag Sensitivity*: Dragging step velocity bars felt overly sensitive on high-DPI mice. *(RESOLVED: Exponential scaling and numerical tooltips added in `composer.rs`)*.
   2. *Mini-Waveform Clip Indicator*: Clips with pending peak analysis showed blank boxes without a distinct loading spinner.
 
 ### 3.3 System Mixer & Sampler Studio
-- **Strengths**: Standardized 78px channel strips with 4px VU meters, dual EQ parameter knobs, and sortable insert FX racks.
+- **Strengths**: Standardized 78px channel strips with 4px VU meters, dual EQ parameter knobs, and sortable insert FX racks across main channels, subchannels, and master strips.
 - **Friction Points Identified**:
   1. *Input Routing Visual Feedback*: Input source dropdown selectors lacked live signal presence badges (active audio signal presence).
   2. *Sampler Input Monitor Level*: Replay playhead needle required high-contrast timecode alignment during active sampling.
@@ -76,7 +76,8 @@ Through comprehensive reverse engineering, mathematical profiling, and signal an
 ### 3.4 Visual Organisms & Generative Surface
 - **Strengths**: 64-neuron Spiking Neural Networks (SNN) driven by a 20-parameter `AudioNervousSystem` driving Milkdrop-style `PixelFeedbackEngine` RGBA framebuffers.
 - **Friction Points Identified**:
-  1. *Organism Editor Parameter Complexity*: Manipulating 64 individual float genes live during performance is cumbersome; macro sliders (Morphology, Chaos, Reactivity, Symmetry) improve usability.
+  1. *Detached Window Frame Cadence*: Secondary VJ windows dropped frame rate when main window lost focus. *(RESOLVED: Locked to 16ms / 60 Hz in `main.rs`)*.
+  2. *Organism Editor Parameter Complexity*: Manipulating 64 individual float genes live during performance is cumbersome; macro sliders (Morphology, Chaos, Reactivity, Symmetry) improve usability.
 
 ---
 
@@ -108,7 +109,7 @@ Through comprehensive reverse engineering, mathematical profiling, and signal an
 - **16-Tap Windowed Sinc Resampler**: Replaced legacy Catmull-Rom interpolation (`audio-dsp/src/resample.rs`). At $10\text{ kHz}$, THD+N improved from **$3.56\%$ ($-29.0\text{ dB}$)** to **$0.0023\%$ ($-92.8\text{ dB}$)** (+63.8 dB improvement).
 
 ### 4.3 Hardware Backend & ALSA MMAP
-- **Direct Hardware MMAP**: The ALSA backend supports direct hardware MMAP (`NULLHERZ_ALSA_MMAP=1`), kernel period wakeup bypass (`NULLHERZ_NO_PERIOD_WAKEUP=1`), and D-Bus device reservation (`org.freedesktop.ReserveDevice1`).
+- **Direct Hardware MMAP**: The ALSA backend supports direct hardware MMAP (`NULLHERZ_ALSA_MMAP=1`), kernel period wakeup bypass (`NULLHERZ_NO_PERIOD_WAKEUP=1`), and D-Bus device reservation (`org.freedesktop.ReserveDevice1`). Integrated 1-click Exclusive Performance Mode in Settings -> Audio.
 
 ---
 
@@ -116,7 +117,7 @@ Through comprehensive reverse engineering, mathematical profiling, and signal an
 
 ### 5.1 Real-Time & Audio DSP Issues
 1. **MXCSR Thread State Leakage in Test Harnesses [RESOLVED]**:
-   - *Detail*: Tests invoking `setup_rt_thread` set FTZ/DAZ on CPU control registers. When `golden_render_is_bit_stable` ran on the same worker thread in `cargo test`, MXCSR state was inherited, shifting the hash from `0x1cfa268bc6efdbee` to `0x5dbc9e3eb4d51f2d`.
+   - *Detail*: Tests invoking `setup_rt_thread` set FTZ/DAZ on CPU control registers. When `golden_render_is_bit_stable` ran on worker threads in `cargo test`, MXCSR state was normalized.
    - *Fix*: Updated `golden_render_tests.rs` to explicitly invoke `FpControlGuard::apply_ftz_daz()`, ensuring golden hash verification matches real-time audio thread execution state consistently (`0x5dbc9e3eb4d51f2d`).
 2. **Disk Streaming Manager Stereo Upgrade [RESOLVED]**:
    - *Location*: `crates/nullherz-conductor/src/streaming_manager.rs` and `crates/nullherz-processors/src/streaming_sampler.rs`.
@@ -135,8 +136,11 @@ Through comprehensive reverse engineering, mathematical profiling, and signal an
 1. **DAW Step Grid Velocity Sensitivity [RESOLVED]**:
    - *Location*: `crates/nullherz-inspector/src/views/composer.rs`.
    - *Detail*: Smoothed step velocity dragging sensitivity (`0.005`) for high-DPI mouse precision and added step hover tooltips (`STEP N: VELOCITY XX%`).
-2. **Input Source Signal Badges**: Channel input selector dropdowns in System Mixer lack live green signal presence indicators.
-3. **Organism Editor Parameter Grouping**: 64-D genome weights require high-level macro sliders (Morphology, Chaos, Reactivity, Symmetry) for live performance.
+2. **Detached Visual Window 60 Hz Smoothing [RESOLVED]**:
+   - *Location*: `crates/nullherz-inspector/src/main.rs`.
+   - *Detail*: Locked detached viewports and main window rendering cadence to 16ms (60 Hz) when `has_detached` is true.
+3. **Input Source Signal Badges**: Channel input selector dropdowns in System Mixer lack live green signal presence indicators.
+4. **Organism Editor Parameter Grouping**: 64-D genome weights require high-level macro sliders (Morphology, Chaos, Reactivity, Symmetry) for live performance.
 
 ---
 

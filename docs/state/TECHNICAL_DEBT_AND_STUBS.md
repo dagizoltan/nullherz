@@ -50,16 +50,25 @@ This document lists the open technical debt, stubs, and prototype logic verified
   - *Detail*: The RT consumer `StreamingSamplerProcessor` is registered (reachable via `StreamingSamplerFactory`) and correctly outputs silence on ring-buffer underrun (no block/panic). But `StreamingManager` — the disk decoder + feeder that fills that ring — is **never constructed or held as a field anywhere**; `start_stream`/`stop_stream` have zero callers. So a `StreamingSampler` node has a ring nothing ever fills → it produces silence. The subsystem is half-wired dead code (cf. the Delay processor above).
   - *Latent bug (only if wired)*: both feeder/decoder threads stop via `Arc::strong_count(&ring) <= 1`, but `StreamingManager::start_stream` also inserts an `Arc` clone into `self.streams` (line 31). While that entry lives, the count can never reach 1, so the per-stream threads would **not terminate when the consumer releases its ring** — they'd run (feeder sleep-spinning on a full ring) until `stop_stream()` clears the entire map. Fix when wiring it: track streams so the liveness check excludes the registry's own `Arc` (e.g. compare against a known baseline count, or add explicit per-stream teardown), and set the feeder thread's priority to match its "high-priority" comment (today it is a plain `thread::spawn` at default priority).
 
-### 1.6 User Interface (UI) Placeholders
+### 1.6 User Interface (UI) Micro-Frictions & Placeholders
 - **Session Restoration Integration — RESOLVED**:
   - *Location*: `crates/nullherz-inspector/src/views/settings/preferences.rs` and `main.rs`.
   - *Detail*: Fully integrated. When enabled (`restore_last_session = true`), startup state restoration automatically reloads `autosave.json` via `Conductor::load_project` and restores active preferences, views, shortcuts, and custom theme colors.
 - **Velocity Drag Sensitivity & Tooltips — RESOLVED**:
   - *Location*: `crates/nullherz-inspector/src/views/composer.rs`.
   - *Detail*: Smoothed step velocity dragging sensitivity (`0.005`) for high-DPI mouse precision and added step hover tooltips (`STEP N: VELOCITY XX%`).
+- **Detached Visual Window 60 Hz Smoothing — RESOLVED**:
+  - *Location*: `crates/nullherz-inspector/src/main.rs`.
+  - *Detail*: Locked detached viewports and main window rendering cadence to 16ms (60 Hz) when `has_detached` is true.
 - **TAU Constant Approximation Warning & Inspector Lints — RESOLVED**:
   - *Location*: `crates/nullherz-inspector/src/state.rs`.
   - *Detail*: Cleaned up float approximation of TAU constant in `ImageTextureEngine` with `std::f32::consts::TAU`. System workspace now compiles 100% warning-free under `RUSTFLAGS="-D warnings" cargo check --workspace --all-targets`.
+- **System Mixer Input Source Signal Badges**:
+  - *Location*: `crates/nullherz-inspector/src/views/mixer.rs`.
+  - *Detail*: Channel input selector dropdowns in System Mixer lack live green signal presence indicators.
+- **Organism Editor Macro Sliders**:
+  - *Location*: `crates/nullherz-inspector/src/views/organism_editor.rs`.
+  - *Detail*: 64-D genome weights require high-level macro sliders (Morphology, Chaos, Reactivity, Symmetry) for live performance.
 - **Breeder Pipeline Telemetry**:
   - *Location*: `crates/nullherz-inspector/src/views/breeder.rs`.
   - *Detail*: The transfusion progress bar displays linear progress but lacks real-time sub-block DSP pipeline feedback metrics from the execution plane.
