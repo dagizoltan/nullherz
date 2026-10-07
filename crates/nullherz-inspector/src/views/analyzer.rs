@@ -1,5 +1,6 @@
-use egui::{Ui, Frame, RichText, Stroke, Color32, Margin};
+use egui::{Ui, Frame, RichText, Stroke, Color32, Margin, Vec2, Sense, Rect, pos2, Align2, FontId};
 use audio_core::Telemetry;
+use nullherz_ui_hal::Theme;
 use crate::InspectorApp;
 use crate::state::AnalyzerMode;
 
@@ -69,6 +70,21 @@ fn format_freq_hz(hz: f32) -> String {
         format!("{:.1} kHz", hz / 1000.0)
     } else {
         format!("{:.0} Hz", hz)
+    }
+}
+
+/// Helper function to render styled filter pills
+fn render_filter_pill(ui: &mut Ui, theme: &Theme, label: &str, active: &mut bool) {
+    let bg_color = if *active { theme.accent.linear_multiply(0.2) } else { theme.bg_inset };
+    let text_color = if *active { theme.accent } else { theme.text_secondary };
+    let border_stroke = if *active { Stroke::new(1.0, theme.accent) } else { Stroke::new(1.0, theme.border_stroke.color) };
+
+    let btn = egui::Button::new(RichText::new(label).size(9.0).strong().color(text_color))
+        .fill(bg_color)
+        .stroke(border_stroke);
+
+    if ui.add(btn).clicked() {
+        *active = !*active;
     }
 }
 
@@ -146,23 +162,25 @@ fn render_realtime_screen(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Optio
         .inner_margin(Margin::symmetric(theme.space_md, theme.space_xs))
         .show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
+                ui.spacing_mut().item_spacing.x = 4.0;
+
                 ui.label(RichText::new("DISPLAY:").size(theme.type_caption).strong().color(theme.accent));
-                ui.toggle_value(&mut app.analyzer.layer_spectral, "[SPECTRAL]");
-                ui.toggle_value(&mut app.analyzer.show_waterfall, "[3D WATERFALL]");
-                ui.toggle_value(&mut app.analyzer.layer_raw, "[RAW]");
+                render_filter_pill(ui, &theme, "SPECTRAL", &mut app.analyzer.layer_spectral);
+                render_filter_pill(ui, &theme, "3D WATERFALL", &mut app.analyzer.show_waterfall);
+                render_filter_pill(ui, &theme, "RAW", &mut app.analyzer.layer_raw);
 
-                ui.add_space(12.0);
+                ui.add_space(10.0);
                 ui.label(RichText::new("PERCEPTION:").size(theme.type_caption).strong().color(theme.accent));
-                ui.toggle_value(&mut app.analyzer.show_camelot_wheel, "[CAMELOT]");
-                ui.toggle_value(&mut app.analyzer.layer_harmonic, "[ISO 226 PHON]");
-                ui.toggle_value(&mut app.analyzer.layer_rhythm, "[RHYTHM]");
-                ui.toggle_value(&mut app.analyzer.layer_transient, "[TRANSIENT]");
+                render_filter_pill(ui, &theme, "CAMELOT", &mut app.analyzer.show_camelot_wheel);
+                render_filter_pill(ui, &theme, "ISO 226 PHON", &mut app.analyzer.layer_harmonic);
+                render_filter_pill(ui, &theme, "RHYTHM", &mut app.analyzer.layer_rhythm);
+                render_filter_pill(ui, &theme, "TRANSIENT", &mut app.analyzer.layer_transient);
 
-                ui.add_space(12.0);
+                ui.add_space(10.0);
                 ui.label(RichText::new("METRICS:").size(theme.type_caption).strong().color(theme.accent));
-                ui.toggle_value(&mut app.analyzer.layer_energy, "[LUFS]");
-                ui.toggle_value(&mut app.analyzer.layer_stereo, "[STEREO VECTORSCOPE]");
-                ui.toggle_value(&mut app.analyzer.layer_collision, "[COLLISION]");
+                render_filter_pill(ui, &theme, "LUFS", &mut app.analyzer.layer_energy);
+                render_filter_pill(ui, &theme, "STEREO VECTORSCOPE", &mut app.analyzer.layer_stereo);
+                render_filter_pill(ui, &theme, "COLLISION", &mut app.analyzer.layer_collision);
             });
         });
 
@@ -204,15 +222,52 @@ fn render_realtime_screen(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Optio
     // --- Central Layout: Spectral Field + Interactive Vectorscope ---
     let total_width = ui.available_width();
     let show_vectorscope = app.analyzer.layer_stereo;
-    let main_canvas_w = if show_vectorscope { (total_width - 210.0).max(300.0) } else { total_width };
+    let main_canvas_w = if show_vectorscope { (total_width - 220.0).max(300.0) } else { total_width };
 
     ui.horizontal(|ui| {
         // --- Central Spectral Field Canvas ---
-        let available_size = egui::vec2(main_canvas_w, 320.0);
-        let (rect, response) = ui.allocate_exact_size(available_size, egui::Sense::hover());
+        let available_size = Vec2::new(main_canvas_w, 320.0);
+        let (rect, response) = ui.allocate_exact_size(available_size, Sense::hover());
 
-        ui.painter().rect_filled(rect, theme.radius_md, egui::Color32::from_rgb(10, 12, 18));
+        ui.painter().rect_filled(rect, theme.radius_md, Color32::from_rgb(10, 12, 18));
         ui.painter().rect_stroke(rect, theme.radius_md, Stroke::new(1.0_f32, theme.border));
+
+        // Background Frequency Gridlines & Labels
+        let freq_ticks = [(0, "20 Hz"), (32, "200 Hz"), (64, "1 kHz"), (96, "5 kHz"), (127, "20 kHz")];
+        for (bin_idx, label) in freq_ticks {
+            let x = rect.left() + (bin_idx as f32 / 128.0) * rect.width();
+            ui.painter().line_segment(
+                [pos2(x, rect.top()), pos2(x, rect.bottom())],
+                Stroke::new(1.0, theme.border_stroke.color.linear_multiply(0.3)),
+            );
+            ui.painter().text(
+                pos2(x + 2.0, rect.bottom() - 14.0),
+                Align2::LEFT_BOTTOM,
+                label,
+                FontId::proportional(8.0),
+                theme.text_secondary,
+            );
+        }
+
+        // dBFS Amplitude Y-Axis Gridlines
+        let db_ticks = [(-60.0, " -60 dBFS"), (-36.0, " -36 dBFS"), (-12.0, " -12 dBFS"), (0.0, " 0 dBFS")];
+        for (db_val, label) in db_ticks {
+            let amp = (10.0f32).powf(db_val / 20.0);
+            let y = rect.bottom() - amp * rect.height() * 0.65;
+            if y >= rect.top() && y <= rect.bottom() {
+                ui.painter().line_segment(
+                    [pos2(rect.left(), y), pos2(rect.right(), y)],
+                    Stroke::new(1.0, theme.border_stroke.color.linear_multiply(0.2)),
+                );
+                ui.painter().text(
+                    pos2(rect.right() - 4.0, y - 2.0),
+                    Align2::RIGHT_BOTTOM,
+                    label,
+                    FontId::proportional(8.0),
+                    theme.text_secondary,
+                );
+            }
+        }
 
         // --- Real-Time Acoustic Anomaly Detector Banner ---
         let peak_max = app.viz.damped_master_peaks[0].max(app.viz.damped_master_peaks[1]);
@@ -222,9 +277,9 @@ fn render_realtime_screen(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Optio
         let has_phase_inversion = phase_corr < -0.4;
 
         if has_clipping || has_phase_inversion {
-            let alert_rect = egui::Rect::from_min_size(
-                egui::pos2(rect.left() + 15.0, rect.top() + 8.0),
-                egui::vec2(rect.width() - 30.0, 22.0),
+            let alert_rect = Rect::from_min_size(
+                pos2(rect.left() + 15.0, rect.top() + 8.0),
+                Vec2::new(rect.width() - 30.0, 22.0),
             );
             ui.painter().rect_filled(alert_rect, theme.radius_sm, theme.danger.linear_multiply(0.2));
             ui.painter().rect_stroke(alert_rect, theme.radius_sm, Stroke::new(1.0_f32, theme.danger));
@@ -237,9 +292,9 @@ fn render_realtime_screen(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Optio
 
             ui.painter().text(
                 alert_rect.center(),
-                egui::Align2::CENTER_CENTER,
+                Align2::CENTER_CENTER,
                 alert_msg,
-                egui::FontId::proportional(9.5),
+                FontId::proportional(9.5),
                 theme.danger,
             );
         }
@@ -260,11 +315,11 @@ fn render_realtime_screen(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Optio
                     let mag = frame[i].clamp(0.0, 1.0);
                     let x = rect.left() + (i as f32) * bin_w * scale + (h_idx as f32 * 1.0);
                     let y = (rect.bottom() - y_offset - mag * rect.height() * 0.35 * scale).clamp(rect.top(), rect.bottom());
-                    pts.push(egui::pos2(x, y));
+                    pts.push(pos2(x, y));
                 }
 
                 for i in 0..num_bins.saturating_sub(1) {
-                    let color = egui::Color32::from_rgb(
+                    let color = Color32::from_rgb(
                         ((i as f32 / num_bins as f32) * 255.0) as u8,
                         (180.0 * alpha) as u8,
                         220,
@@ -280,13 +335,13 @@ fn render_realtime_screen(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Optio
             for i in 0..num_bins {
                 let mag_a = spectrum_a[i].clamp(0.0, 1.0);
                 let bar_h = mag_a * rect.height() * 0.65;
-                let bar_rect = egui::Rect::from_min_max(
-                    egui::pos2(rect.left() + i as f32 * bin_w, rect.bottom() - bar_h),
-                    egui::pos2(rect.left() + (i + 1) as f32 * bin_w - 1.0, rect.bottom()),
+                let bar_rect = Rect::from_min_max(
+                    pos2(rect.left() + i as f32 * bin_w, rect.bottom() - bar_h),
+                    pos2(rect.left() + (i + 1) as f32 * bin_w - 1.0, rect.bottom()),
                 );
 
                 let hue = (i as f32 / num_bins as f32) * 0.75;
-                let color_a = egui::Color32::from_rgb(
+                let color_a = Color32::from_rgb(
                     (hue * 255.0) as u8,
                     ((1.0 - hue) * 220.0) as u8,
                     240,
@@ -297,7 +352,7 @@ fn render_realtime_screen(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Optio
                 if mag_a > 0.05 {
                     let peak_y = (rect.bottom() - bar_h - 2.0).clamp(rect.top(), rect.bottom());
                     ui.painter().line_segment(
-                        [egui::pos2(rect.left() + i as f32 * bin_w, peak_y), egui::pos2(rect.left() + (i + 1) as f32 * bin_w - 1.0, peak_y)],
+                        [pos2(rect.left() + i as f32 * bin_w, peak_y), pos2(rect.left() + (i + 1) as f32 * bin_w - 1.0, peak_y)],
                         Stroke::new(1.5_f32, theme.accent),
                     );
                 }
@@ -316,24 +371,24 @@ fn render_realtime_screen(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Optio
 
                     // Draw vertical guideline
                     ui.painter().line_segment(
-                        [egui::pos2(pos.x, rect.top()), egui::pos2(pos.x, rect.bottom())],
+                        [pos2(pos.x, rect.top()), pos2(pos.x, rect.bottom())],
                         Stroke::new(1.0, theme.accent.linear_multiply(0.6)),
                     );
 
                     // Draw hover tooltip pill
                     let info_text = format!("{} | {:.1} dBFS", note_str, db_val);
-                    let pill_pos = egui::pos2(
+                    let pill_pos = pos2(
                         (pos.x + 10.0).clamp(rect.left() + 5.0, rect.right() - 150.0),
                         (pos.y - 25.0).clamp(rect.top() + 5.0, rect.bottom() - 25.0),
                     );
-                    let pill_rect = egui::Rect::from_min_size(pill_pos, egui::vec2(140.0, 20.0));
-                    ui.painter().rect_filled(pill_rect, theme.radius_sm, egui::Color32::from_rgb(20, 28, 42));
+                    let pill_rect = Rect::from_min_size(pill_pos, Vec2::new(140.0, 20.0));
+                    ui.painter().rect_filled(pill_rect, theme.radius_sm, Color32::from_rgb(20, 28, 42));
                     ui.painter().rect_stroke(pill_rect, theme.radius_sm, Stroke::new(1.0, theme.accent));
                     ui.painter().text(
                         pill_rect.center(),
-                        egui::Align2::CENTER_CENTER,
+                        Align2::CENTER_CENTER,
                         info_text,
-                        egui::FontId::proportional(10.0),
+                        FontId::proportional(10.0),
                         theme.accent,
                     );
                 }
@@ -353,24 +408,24 @@ fn render_realtime_screen(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Optio
 
             let (key_name, camelot_code) = pitch_index_to_camelot(root_pitch, true);
 
-            let wheel_center = egui::pos2(rect.left() + 85.0, rect.top() + 85.0);
+            let wheel_center = pos2(rect.left() + 85.0, rect.top() + 85.0);
             let wheel_r = 45.0;
 
-            ui.painter().circle_filled(wheel_center, wheel_r, egui::Color32::from_rgb(18, 24, 38).linear_multiply(0.92));
+            ui.painter().circle_filled(wheel_center, wheel_r, Color32::from_rgb(18, 24, 38).linear_multiply(0.92));
             ui.painter().circle_stroke(wheel_center, wheel_r, Stroke::new(1.5_f32, theme.accent));
 
             ui.painter().text(
-                wheel_center - egui::vec2(0.0, 8.0),
-                egui::Align2::CENTER_CENTER,
+                wheel_center - Vec2::new(0.0, 8.0),
+                Align2::CENTER_CENTER,
                 camelot_code,
-                egui::FontId::proportional(14.0),
+                FontId::proportional(14.0),
                 theme.accent,
             );
             ui.painter().text(
-                wheel_center + egui::vec2(0.0, 10.0),
-                egui::Align2::CENTER_CENTER,
+                wheel_center + Vec2::new(0.0, 10.0),
+                Align2::CENTER_CENTER,
                 key_name,
-                egui::FontId::proportional(9.0),
+                FontId::proportional(9.0),
                 theme.text_secondary,
             );
         }
@@ -390,22 +445,22 @@ fn render_realtime_screen(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Optio
                 let stroke_w = if is_downbeat { 2.0_f32 } else { 1.0_f32 };
 
                 ui.painter().line_segment(
-                    [egui::pos2(bx, rect.top()), egui::pos2(bx, rect.bottom())],
+                    [pos2(bx, rect.top()), pos2(bx, rect.bottom())],
                     Stroke::new(stroke_w, stroke_color.linear_multiply(0.4)),
                 );
             }
 
             let playhead_x = rect.left() + ((beat_pos % 16.0) / 16.0) * rect.width();
             ui.painter().line_segment(
-                [egui::pos2(playhead_x, rect.top()), egui::pos2(playhead_x, rect.bottom())],
+                [pos2(playhead_x, rect.top()), pos2(playhead_x, rect.bottom())],
                 Stroke::new(2.5_f32, theme.warning),
             );
 
             ui.painter().text(
-                rect.right_top() - egui::vec2(10.0, -8.0),
-                egui::Align2::RIGHT_TOP,
+                rect.right_top() - Vec2::new(10.0, -8.0),
+                Align2::RIGHT_TOP,
                 format!("BPM: {:.1} | BEAT: {:.2}", bpm, beat_pos),
-                egui::FontId::monospace(10.0),
+                FontId::monospace(10.0),
                 theme.warning,
             );
         }
@@ -418,12 +473,12 @@ fn render_realtime_screen(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Optio
                     let factor = calculate_iso226_phon_factor(i, *phon);
                     let x = rect.left() + (i as f32 + 0.5) * bin_w;
                     let y = (rect.bottom() - factor * rect.height() * 0.35).clamp(rect.top(), rect.bottom());
-                    phon_pts.push(egui::pos2(x, y));
+                    phon_pts.push(pos2(x, y));
                 }
                 for i in 0..num_bins.saturating_sub(1) {
                     ui.painter().line_segment(
                         [phon_pts[i], phon_pts[i + 1]],
-                        Stroke::new(1.2_f32, egui::Color32::from_rgb(0, 220, 180).linear_multiply(*phon / 100.0)),
+                        Stroke::new(1.2_f32, Color32::from_rgb(0, 220, 180).linear_multiply(*phon / 100.0)),
                     );
                 }
             }
@@ -433,21 +488,21 @@ fn render_realtime_screen(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Optio
         if app.analyzer.layer_energy {
             let lufs_y = rect.top() + 35.0;
             ui.painter().text(
-                egui::pos2(rect.left() + 10.0, lufs_y),
-                egui::Align2::LEFT_TOP,
+                pos2(rect.left() + 10.0, lufs_y),
+                Align2::LEFT_TOP,
                 format!("EBU R128: Momentary {:.1} LUFS | Short-Term {:.1} LUFS | Integrated {:.1} LUFS | LRA: {:.1} LU",
                     momentary_lufs, short_term_lufs, integrated_lufs, loudness_range_lra),
-                egui::FontId::proportional(10.0),
+                FontId::proportional(10.0),
                 theme.success,
             );
         }
 
         // --- Side Panel: Interactive Lissajous Goniometer / Stereo Vectorscope ---
         if show_vectorscope {
-            let vec_size = egui::vec2(200.0, 320.0);
-            let (v_rect, _) = ui.allocate_exact_size(vec_size, egui::Sense::hover());
+            let vec_size = Vec2::new(210.0, 320.0);
+            let (v_rect, _) = ui.allocate_exact_size(vec_size, Sense::hover());
 
-            ui.painter().rect_filled(v_rect, theme.radius_md, egui::Color32::from_rgb(12, 14, 20));
+            ui.painter().rect_filled(v_rect, theme.radius_md, Color32::from_rgb(12, 14, 20));
             ui.painter().rect_stroke(v_rect, theme.radius_md, Stroke::new(1.0_f32, theme.border));
 
             let center = v_rect.center();
@@ -455,11 +510,11 @@ fn render_realtime_screen(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Optio
 
             // Draw Lissajous crosshairs (M/S axes)
             ui.painter().circle_stroke(center, radius, Stroke::new(1.0, theme.border));
-            ui.painter().line_segment([egui::pos2(center.x - radius, center.y), egui::pos2(center.x + radius, center.y)], Stroke::new(1.0, theme.border));
-            ui.painter().line_segment([egui::pos2(center.x, center.y - radius), egui::pos2(center.x, center.y + radius)], Stroke::new(1.0, theme.border));
+            ui.painter().line_segment([pos2(center.x - radius, center.y), pos2(center.x + radius, center.y)], Stroke::new(1.0, theme.border));
+            ui.painter().line_segment([pos2(center.x, center.y - radius), pos2(center.x, center.y + radius)], Stroke::new(1.0, theme.border));
 
-            ui.painter().text(egui::pos2(center.x, center.y - radius - 8.0), egui::Align2::CENTER_CENTER, "+M (Mono)", egui::FontId::proportional(8.0), theme.text_secondary);
-            ui.painter().text(egui::pos2(center.x + radius + 12.0, center.y), egui::Align2::CENTER_CENTER, "+S (Side)", egui::FontId::proportional(8.0), theme.text_secondary);
+            ui.painter().text(pos2(center.x, center.y - radius - 8.0), Align2::CENTER_CENTER, "+M (Mono)", FontId::proportional(8.0), theme.text_secondary);
+            ui.painter().text(pos2(center.x + radius + 12.0, center.y), Align2::CENTER_CENTER, "+S (Side)", FontId::proportional(8.0), theme.text_secondary);
 
             // Draw Goniometer polar scatter cloud
             let mut points = Vec::with_capacity(128);
@@ -468,7 +523,7 @@ fn render_realtime_screen(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Optio
                 let sample_s = goniometer[(i + 32) % 128];
                 let px = center.x + sample_s * radius * 0.9;
                 let py = center.y - sample_m * radius * 0.9;
-                points.push(egui::pos2(px, py));
+                points.push(pos2(px, py));
             }
 
             for i in 0..points.len().saturating_sub(1) {
@@ -478,10 +533,10 @@ fn render_realtime_screen(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Optio
             // Phase correlation indicator
             let corr_y = v_rect.bottom() - 25.0;
             ui.painter().text(
-                egui::pos2(center.x, corr_y),
-                egui::Align2::CENTER_CENTER,
+                pos2(center.x, corr_y),
+                Align2::CENTER_CENTER,
                 format!("Phase Correlation: {:.2}", phase_corr),
-                egui::FontId::proportional(9.0),
+                FontId::proportional(9.0),
                 if phase_corr >= 0.0 { theme.success } else { theme.danger },
             );
         }
@@ -631,10 +686,10 @@ fn render_full_track_screen(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Opt
                 ui.add_space(2.0);
 
                 // --- Full-Track Multi-Band Waveform Canvas ---
-                let available_size = egui::vec2(ui.available_width(), 150.0);
-                let (rect, _response) = ui.allocate_exact_size(available_size, egui::Sense::click_and_drag());
+                let available_size = Vec2::new(ui.available_width(), 150.0);
+                let (rect, _response) = ui.allocate_exact_size(available_size, Sense::click_and_drag());
 
-                ui.painter().rect_filled(rect, theme.radius_sm, egui::Color32::from_rgb(12, 16, 24));
+                ui.painter().rect_filled(rect, theme.radius_sm, Color32::from_rgb(12, 16, 24));
                 ui.painter().rect_stroke(rect, theme.radius_sm, Stroke::new(1.0_f32, theme.border));
 
                 let peaks = track.metadata.peaks.as_slice();
@@ -648,7 +703,7 @@ fn render_full_track_screen(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Opt
                         let x = rect.left() + i as f32 * step_w;
                         let h = (amp.abs() * half_h).clamp(1.0, half_h);
                         ui.painter().line_segment(
-                            [egui::pos2(x, center_y - h), egui::pos2(x, center_y + h)],
+                            [pos2(x, center_y - h), pos2(x, center_y + h)],
                             Stroke::new(1.2_f32, theme.accent.linear_multiply(0.8)),
                         );
                     }
@@ -661,7 +716,7 @@ fn render_full_track_screen(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Opt
                         let pos_norm = (t_frame as f64 / total_samples as f64).clamp(0.0, 1.0) as f32;
                         let tx = rect.left() + pos_norm * rect.width();
                         ui.painter().line_segment(
-                            [egui::pos2(tx, rect.bottom()), egui::pos2(tx, rect.bottom() - 25.0)],
+                            [pos2(tx, rect.bottom()), pos2(tx, rect.bottom() - 25.0)],
                             Stroke::new(1.0_f32, theme.danger.linear_multiply(0.7)),
                         );
                     }
@@ -673,14 +728,14 @@ fn render_full_track_screen(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Opt
                         let cue_norm = (cue_frame as f64 / total_samples as f64).clamp(0.0, 1.0) as f32;
                         let cx = rect.left() + cue_norm * rect.width();
                         ui.painter().line_segment(
-                            [egui::pos2(cx, rect.top()), egui::pos2(cx, rect.bottom())],
+                            [pos2(cx, rect.top()), pos2(cx, rect.bottom())],
                             Stroke::new(1.5_f32, theme.success),
                         );
                         ui.painter().text(
-                            egui::pos2(cx + 3.0, rect.top() + 10.0),
-                            egui::Align2::LEFT_TOP,
+                            pos2(cx + 3.0, rect.top() + 10.0),
+                            Align2::LEFT_TOP,
                             format!("CUE {}", cue_idx + 1),
-                            egui::FontId::proportional(8.0),
+                            FontId::proportional(8.0),
                             theme.success,
                         );
                     }
@@ -693,7 +748,7 @@ fn render_full_track_screen(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Opt
                 let playhead_x = rect.left() + playhead_norm * rect.width();
 
                 ui.painter().line_segment(
-                    [egui::pos2(playhead_x, rect.top()), egui::pos2(playhead_x, rect.bottom())],
+                    [pos2(playhead_x, rect.top()), pos2(playhead_x, rect.bottom())],
                     Stroke::new(2.0_f32, theme.warning),
                 );
 
@@ -706,10 +761,10 @@ fn render_full_track_screen(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Opt
                             ui.label(RichText::new("16D SOUNDDNA POLAR LATENT RADAR").strong().size(theme.type_caption).color(theme.accent));
                             ui.add_space(4.0);
 
-                            let radar_size = egui::vec2(ui.available_width(), 160.0);
-                            let (r_rect, _) = ui.allocate_exact_size(radar_size, egui::Sense::hover());
+                            let radar_size = Vec2::new(ui.available_width(), 160.0);
+                            let (r_rect, _) = ui.allocate_exact_size(radar_size, Sense::hover());
 
-                            ui.painter().rect_filled(r_rect, theme.radius_sm, egui::Color32::from_rgb(10, 14, 22));
+                            ui.painter().rect_filled(r_rect, theme.radius_sm, Color32::from_rgb(10, 14, 22));
                             ui.painter().rect_stroke(r_rect, theme.radius_sm, Stroke::new(1.0, theme.border));
 
                             let r_center = r_rect.center();
@@ -730,12 +785,12 @@ fn render_full_track_screen(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Opt
 
                                 let px = r_center.x + angle.cos() * dist;
                                 let py = r_center.y + angle.sin() * dist;
-                                polygon_pts.push(egui::pos2(px, py));
+                                polygon_pts.push(pos2(px, py));
 
                                 // Draw radial spokes
                                 let edge_x = r_center.x + angle.cos() * r_max_radius;
                                 let edge_y = r_center.y + angle.sin() * r_max_radius;
-                                ui.painter().line_segment([r_center, egui::pos2(edge_x, edge_y)], Stroke::new(1.0, theme.border.linear_multiply(0.3)));
+                                ui.painter().line_segment([r_center, pos2(edge_x, edge_y)], Stroke::new(1.0, theme.border.linear_multiply(0.3)));
                             }
 
                             // Fill SoundDNA radar polygon
