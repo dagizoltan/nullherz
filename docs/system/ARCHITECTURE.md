@@ -1,6 +1,9 @@
 # Nullherz System Architecture Reference
 
-**Source of truth:** reverse-engineered from the workspace code on 2026-07-20; refreshed 2026-07-21; evaluated and hardened 2026-07-28 (16-tap sinc resampler, -107.1 dB THD+N signal transparency, 7.33 ms RAW latency, f64 playhead tracking, RT zero-alloc counting allocator, warning-free workspace compilation).
+**Source of truth:** reverse-engineered from the workspace code on 2026-07-20; refreshed 2026-07-21 and 2026-07-28; **re-measured against the tree 2026-10-08** (`main` @ `9d4be33`).
+
+**Measured state as of 2026-10-08** — every figure reproducible, see [`REVERSE_ENGINEERING_SYSTEM_REPORT_2026.md`](../state/REVERSE_ENGINEERING_SYSTEM_REPORT_2026.md) for the commands:
+16-tap Kaiser-β=14 sinc resampler with cubic table interpolation at **-129 dB THD+N, flat across frequency**; console transparency **-146.1 dB THD+N** at unity, response ripple **±0.056 dB** about a **-3.04 dB** mean (the constant-power crossfader law at centre — by design, see §2.1); **7.33 ms** RAW action-to-sound at 256 frames, 3.33 ms at 64; f64 playhead; RT zero-alloc counting allocator with a self-verifying guard; warning-free workspace compilation; **552 tests green in debug, 1 failing in release** (`test_long_track_does_not_stall_the_control_path` — ALSA device enumeration on the conductor tick path).
 **Scope:** every crate and sidecar in the workspace, the runtime data flow, wire protocols, and on-disk state.
 
 This document describes *what is actually in the tree*, as opposed to the strategy and status documents which describe intent and maturity. When this document and the code disagree, the code wins — please update this file in the same PR.
@@ -9,58 +12,124 @@ This document describes *what is actually in the tree*, as opposed to the strate
 
 ## 1. Workspace Map
 
-~60,000 lines of Rust (tests included) across 19 crates and 8 sidecar binaries, organized by the Triple-Plane Isolation Model (see [AGENTS.md](../../AGENTS.md)).
+**~102,000 lines of Rust** (tests included) across **20 workspace crates, 23 sidecar binaries and the root `nullherz` binary** (44 cargo packages), organized by the Triple-Plane Isolation Model (see [AGENTS.md](../../AGENTS.md)).
+
+Per-crate line counts below were re-counted on 2026-10-08. They had drifted by 2–4x since the last refresh, so treat any LOC figure in this file without a date as unverified.
 
 ### 1.1 Execution Plane (the RT hot path)
 
 | Crate | LOC | Responsibility |
 | :--- | ---: | :--- |
-| `audio-core` | ~4.4k | `AudioEngine<K: ProcessingKernel>` (statically dispatched), `ProcessorGraph` VM, sample-accurate command scheduling (`engine/processing_kernel.rs`), parallel stage execution (`processors/graph/pool.rs`), buffer pool with PDC lines (`MAX_BUFFERS` audio blocks + crossfade blocks), RT logging, resource recycler, telemetry finalizer. `processors/graph/verification.rs` holds the executor's block-geometry proptests (see §5). |
-| `audio-dsp` | ~3.7k | SIMD math foundation: `FloatX16` vector abstraction with AVX-512 / wasm-simd128 / scalar fallback paths (`simd_vec.rs`), biquad & Linkwitz-Riley filters plus RBJ shelf/peaking constructors and the 3-band `MasteringEq` master tone stage (low shelf 120 Hz / mid peak 1 kHz / high shelf 8 kHz in series; every band at unity gain is the bit-exact identity biquad, coefficient changes ramp), oscillators (incl. the planar `SamplerVoice` — see §2.1), spectral kernels (FFT overlap-add with exact COLA-normalized synthesis window, `complex_mul_accumulate_wasm_simd`), and the editor DSP toolbox in `util.rs`: OLA `time_stretch`, spectral-flux transient/onset detection, spectral envelope extraction, waveform MIP-level generation, polyphase up/downsamplers, Newton solver, n-dimensional slerp. Real-time zero-allocation neural DSP insert specifications (TCN, SSM, HyperNetwork parametric EQs, Padé activations) are detailed in [`NEURAL_DSP_INSERT_SPECIFICATION.md`](./NEURAL_DSP_INSERT_SPECIFICATION.md). |
-| `nullherz-processors` | ~5.7k | The processor library: **24 registered factories** (Gain, Biquad, SimdBiquad, Sampler, StreamingSampler, Crossfader, Summing, Spectral, SpectralMorph, Wavetable, Modulation, Sequencer, EnvelopeFollower, Granular, Capture, DjIsolator, MasteringEq, KeySync — a real phase-vocoder pitch shifter with per-bin phase tracking, PersonalityInheritance, DnaMorph, Limiter, Compressor, StereoUtility, Analysis, Delay) plus the `FallbackProcessor` (bypass) and the sidecar proxy processor. Registration is not reachability: **14 of the 24 are never instantiated by the bootstrapped console**, each declared with a reason in `known_unreachable()` (`conductor/tests/reachability_gate_test.rs`). Shrinking that list is tracked work, not a permanent state. Conformance `test_kit` and golden-hash render regression tests included. |
+| `audio-core` | 6.0k | `AudioEngine<K: ProcessingKernel>` (statically dispatched), `ProcessorGraph` VM, sample-accurate command scheduling (`engine/processing_kernel.rs`), parallel stage execution (`processors/graph/pool.rs`), buffer pool with PDC lines (`MAX_BUFFERS` audio blocks + crossfade blocks), RT logging, resource recycler, telemetry finalizer. `processors/graph/verification.rs` holds the executor's block-geometry proptests (see §5). |
+| `audio-dsp` | 8.8k | SIMD math foundation: `FloatX16` vector abstraction with AVX-512 / wasm-simd128 / scalar fallback paths (`simd_vec.rs`), biquad & Linkwitz-Riley filters plus RBJ shelf/peaking constructors and the 3-band `MasteringEq` master tone stage (low shelf 120 Hz / mid peak 1 kHz / high shelf 8 kHz in series; every band at unity gain is the bit-exact identity biquad, coefficient changes ramp), oscillators (incl. the planar `SamplerVoice` — see §2.1), spectral kernels (FFT overlap-add with exact COLA-normalized synthesis window, `complex_mul_accumulate_wasm_simd`), and the editor DSP toolbox in `util.rs`: OLA `time_stretch`, spectral-flux transient/onset detection, spectral envelope extraction, waveform MIP-level generation, polyphase up/downsamplers, Newton solver, n-dimensional slerp. Real-time zero-allocation neural DSP insert specifications (TCN, SSM, HyperNetwork parametric EQs, Padé activations) are detailed in [`NEURAL_DSP_INSERT_SPECIFICATION.md`](./NEURAL_DSP_INSERT_SPECIFICATION.md). |
+| `nullherz-processors` | 14.9k | The processor library: **44 registered factories** (re-counted 2026-10-08; it was 24 at the last refresh). Core routing and sources: Gain, Biquad, SimdBiquad, Sampler, StreamingSampler, Crossfader, Summing, Wavetable, Sequencer, Modulation, EnvelopeFollower, Capture, Bypass/`FallbackProcessor`, and the sidecar proxy. Tone and dynamics: DjIsolator, MasteringEq, Limiter, Compressor, MultiBandCompressor, StereoUtility, TransientShaper, TapeSaturator, TubePreamp, Delay, Reverb, ModulationFx, HyperNetworkEq, Analysis. Spectral and DNA: Spectral, SpectralMorph, Granular, KeySync (a real phase vocoder with per-bin phase tracking, frequencies carried in **bin units** so it is sample-rate agnostic by construction), PersonalityInheritance, DnaMorph, Mutator, DeckStemMatrix. Neural inserts: NeuralSaturator, NeuralFilter, NeuralTcn, NeuralSsm, NeuralNam. Instruments: SampleDrumMachine, SynthDrumMachine, NeuralDrumMachine, DrumMachine.
+
+**Registration is not reachability.** 11 of the 44 are instantiated by the bootstrapped console; the other **33 are declared in `known_unreachable()`** with a reason (`conductor/tests/reachability_gate_test.rs`), 16 of them as *"available for FX chains"*. Note what that phrase currently means in practice: the bootstrap allocates **one** FX slot per deck (`create_dj_deck(deck, &[1], bus)`), so an operator can reach exactly one of those 16 at a time and cannot control its parameters from the UI — see [`TECHNICAL_DEBT_AND_STUBS.md`](../state/TECHNICAL_DEBT_AND_STUBS.md) §3.1. Shrinking the list is tracked work, not a permanent state. Conformance `test_kit` and golden-hash render regression tests included; `GauntletRunner` **is** wired (`conformance_gauntlet.rs:50`). |
+
+
+#### 1.1.1 Where the DSP is strong and where it is not, measured 2026-10-08
+
+This table is the one to read before planning sound-design work. The gap between
+rows is wide and it is not architectural — the graph, the slot discipline and the
+PDC machinery are ready for better processors than they currently host.
+
+| Area | Measured | Verdict |
+| :--- | :--- | :--- |
+| `SamplerVoice` resampling (16-tap Kaiser β=14 sinc, cubic table) | **-129 dB THD+N, flat 997 Hz → 10 kHz** at realistic tempo ratios; 100 dB better than the Catmull-Rom it replaced | **reference grade** |
+| Console transparency at unity | -146.1 dB THD+N; ±0.056 dB ripple, 40 Hz – 16 kHz | **reference grade** |
+| `MasteringEq`, `BiquadFilter`, `SimdBiquad`, `ZdfSvf`, `MoogLadder`, Linkwitz-Riley | identity-at-unity, ramped coefficient changes, f64 inner loop available | **solid** |
+| `KeySync` phase vocoder | rate-agnostic by construction (bin-unit frequencies), but **-17.8 dB worst partial suppression** and **7.65 dB spread between partials** — a *timbral* error no makeup gain fixes | **known wrong, replacement specified** |
+| `LimiterProcessor` | holds the ceiling exactly; transparent below threshold (-150 dB); but **1.2% THD on 60 Hz under 6 dB of limiting**, and **sample-peak only** — not ITU-R BS.1770 true peak | **performance limiter, not mastering** |
+| Saturation (`TapeSaturator`, `TubePreamp`, `NeuralSaturator`, `NeuralFilter`) | memoryless `tanh`/Padé at base rate, **no oversampling anywhere in the tree** → harmonics above Nyquist fold back in band | **aliases** |
+| `AlgorithmicReverbProcessor` | 4+2 Freeverb (canonical is 8+4), **delay lengths hardcoded to 44.1 kHz with no path to the session rate**, **identical impulse response in both channels** (zero stereo width), 384 KB struct for 1356 samples of delay | **placeholder** |
+
+Decimation detail worth knowing before claiming pitch-up quality: the sinc kernel
+*does* scale its anti-alias cutoff by the stretch, but 16 taps give a finite
+transition width. A 16 kHz source at rate 1.6 leaves a **-17.7 dB** fold at
+22.4 kHz; at rate 2.0, **-63.0 dB**; by rate 2.2 it is gone (-136 dB). On music,
+where 16 kHz energy sits ~40 dB below peak, the consequence is small — but an
+earlier published figure of "-90.9 dB at rate 2.0" does **not** reproduce.
 
 ### 1.2 Protocol Plane (shared schemas & lock-free transport)
 
 | Crate | LOC | Responsibility |
 | :--- | ---: | :--- |
-| `nullherz-traits` | ~3.1k | The ABI of the system. Command hierarchy (`CoreCommand`, `MixerCommand`, `PerformanceCommand`, `ResourceCommand`, `DnaCommand`, `TopologyCommand` wrapped in `TimestampedCommand`), `SignalProcessor`/`AudioProcessor` traits, `Transport`, `CompiledGraphPlan`, `GraphTopology`/`TopologyMutation`, `ModulationMatrix` with `TemporalShape` ramps, `SubBlockIterator`, RT-thread marking (`mark_as_rt_thread`/`run_rt_safe`), clock providers (incl. `PtpClockProvider` with hardware RX timestamps), telemetry schema, PI clock-servo anti-windup proptests; `test_kit::rt_alloc`, the counting allocator behind the RT zero-allocation tests. `SampleMetadata` carries the waveform display data: proportional peaks (one per 128 samples), `MipWaveform` pyramids, and `BandWaveform` — per-window low/mid/high band peaks plus the signed min/max envelope for frequency-colored rendering (serde-defaulted for pre-band libraries). Home of the sizing constants (`execution.rs`): `MAX_BLOCK_SIZE=1024`, `MAX_NODES=128`, `MAX_BUFFERS=240`, `MAX_CHANNELS=16`, `MAX_CROSSFADE_BUFFERS=8`, and the 64-byte-aligned `AudioBlock` (re-exported by `ipc-layer`). |
-| `ipc-layer` | ~1.2k | Lock-free transport: SPSC/MPSC ring buffers, shared-memory (`shm_open`) ring buffers with `EventFd` signaling, `ShmSignal` heartbeats, TCP framing (`tcp.rs`), RT priority + FTZ/DAZ setup (`setup_rt_thread`), thread pinning, cgroup helpers (`move_to_cgroup`, `set_cgroup_memory_limit`), stale-segment cleanup. `SchedStatus`/`realtime_available` (what the audio thread's scheduling policy ACTUALLY is, read back from the kernel), ring-buffer and `ShmSignal` tests. |
+| `nullherz-traits` | 4.6k | The ABI of the system. Command hierarchy (`CoreCommand`, `MixerCommand`, `PerformanceCommand`, `ResourceCommand`, `DnaCommand`, `TopologyCommand` wrapped in `TimestampedCommand`), `SignalProcessor`/`AudioProcessor` traits, `Transport`, `CompiledGraphPlan`, `GraphTopology`/`TopologyMutation`, `ModulationMatrix` with `TemporalShape` ramps, `SubBlockIterator`, RT-thread marking (`mark_as_rt_thread`/`run_rt_safe`), clock providers (incl. `PtpClockProvider` with hardware RX timestamps), telemetry schema, PI clock-servo anti-windup proptests; `test_kit::rt_alloc`, the counting allocator behind the RT zero-allocation tests. `SampleMetadata` carries the waveform display data: proportional peaks (one per 128 samples), `MipWaveform` pyramids, and `BandWaveform` — per-window low/mid/high band peaks plus the signed min/max envelope for frequency-colored rendering (serde-defaulted for pre-band libraries). Home of the sizing constants (`execution.rs`): `MAX_BLOCK_SIZE=1024`, `MAX_NODES=128`, `MAX_BUFFERS=240`, `MAX_CHANNELS=16`, `MAX_CROSSFADE_BUFFERS=8`, and the 64-byte-aligned `AudioBlock` (re-exported by `ipc-layer`). |
+| `ipc-layer` | 2.9k | Lock-free transport: SPSC/MPSC ring buffers, shared-memory (`shm_open`) ring buffers with `EventFd` signaling, `ShmSignal` heartbeats, TCP framing (`tcp.rs`), RT priority + FTZ/DAZ setup (`setup_rt_thread`), thread pinning, cgroup helpers (`move_to_cgroup`, `set_cgroup_memory_limit`), stale-segment cleanup. `SchedStatus`/`realtime_available` (what the audio thread's scheduling policy ACTUALLY is, read back from the kernel), ring-buffer and `ShmSignal` tests. |
 
 ### 1.3 Orchestration Plane
 
 | Crate | LOC | Responsibility |
 | :--- | ---: | :--- |
-| `nullherz-conductor` | ~8.0k | The daemon (`main.rs` binary + library). Subsystems: `orchestrator` (tick loop), `topology_manager` (off-thread Kahn compilation → `SetTopology` O(1) swap), `command_handler`, `engine_coordinator`, `sidecar_supervisor` (heartbeat → soft fallback → safe mode), `pattern_manager` (song arrangements), `clip_orchestrator` (8×8 clip grid with launch quantization + telemetry), `genetic_sequencer` (DNA-driven pattern evolution), `modulation_matrix`, `mixer_bridge`/`mixer_orchestrator`, `timeline`, `midi_clock`/`midi_mapper`/`midi_sequence_kernel`, `analysis_worker` + `analysis_kernel` (BPM/key/transient extraction), `folder_monitor` (library watch), `streaming_manager` (double-buffered disk streaming), `transfusion_manager`, `ptp_engine` (UDP clock sync), `discovery` (UDP beacon + plugin dir watcher), `persistence` (`SystemConfig`, `ProjectState` bincode/JSON), `bounce` (offline WAV render), `ipc_audio_bridge` (jitter buffer, Kani-proved). |
-| `nullherz-topology` | ~0.8k | Declarative graph reconciliation: diffs desired vs. actual `GraphTopology` into minimal `TopologyMutation` batches; `compiler.rs` produces `CompiledGraphPlan` stages, computes PDC path latencies, and re-verifies the plan hazard-free (`verify_no_hazards`, backed by unit tests and proptests). Hazard checking covers sidechains as well as inputs, and `verify_stage_ids_in_range` rejects any plan carrying a node id the executor could not index. |
-| `nullherz-mixer` | ~0.6k | Console builders: `create_4channel_mixer`, `create_dj_deck` (A–D logical decks), `create_studio_strip`, `create_aux_bus`, `create_crossfader`, plus topology validation. Each deck strip is Sampler → DnaMorph → KeySync → Gain → Biquad → StereoUtility → *(insert fx)* → DjIsolator, **stereo at every hop** (an L/R buffer pair per stage, `link_stereo` in `dj.rs`), ending in private per-deck L/R buffers plus stereo cue-bus sends; each deck also owns a live SEQUENCER node (`deck_x_sequencer`, trigger generator for DNA groove micro-timing — it needs an output edge to tick). The master chain sums per side (`master_sum_l`/`master_sum_r`, named for telemetry) with the preview sampler mixed in as a summing input, then runs stereo through `master_eq` (a `MASTERING_EQ` node — the mastering view's LOW/MID/HIGH knobs bind to it by name, params 0/1/2, linear gain) into `master_limiter` and out to the master L/R buffers. The four private per-deck cue sends are mixed onto the global cue bus by per-side summing nodes (`cue_sum_l`/`cue_sum_r`) — decks writing the cue buffers directly was a four-producer overwrite where only deck D survived. A named `capture_node` taps the master as a pure consumer for live capture into the sample registry/library. Node and buffer IDs come from the shared `IdAllocator` (separate address spaces). Emits command batches; owns no DSP. |
-| `control-plane` | ~0.1k | Thin utility layer (largely superseded by conductor; minimal code). |
-| `nullherz-setup` | ~0.1k | Setup binary (config bootstrap). |
+| `nullherz-conductor` | 20.6k | The daemon (`main.rs` binary + library). Subsystems: `orchestrator` (tick loop), `topology_manager` (off-thread Kahn compilation → `SetTopology` O(1) swap), `command_handler`, `engine_coordinator`, `sidecar_supervisor` (heartbeat → soft fallback → safe mode), `pattern_manager` (song arrangements), `clip_orchestrator` (8×8 clip grid with launch quantization + telemetry), `genetic_sequencer` (DNA-driven pattern evolution), `modulation_matrix`, `mixer_bridge`/`mixer_orchestrator`, `timeline`, `midi_clock`/`midi_mapper`/`midi_sequence_kernel`, `analysis_worker` + `analysis_kernel` (BPM/key/transient extraction), `folder_monitor` (library watch), `streaming_manager` (double-buffered disk streaming), `transfusion_manager`, `ptp_engine` (UDP clock sync), `discovery` (UDP beacon + plugin dir watcher), `persistence` (`SystemConfig`, `ProjectState` bincode/JSON), `bounce` (offline WAV render), `ipc_audio_bridge` (jitter buffer, Kani-proved). |
+| `nullherz-topology` | 2.2k | Declarative graph reconciliation: diffs desired vs. actual `GraphTopology` into minimal `TopologyMutation` batches; `compiler.rs` produces `CompiledGraphPlan` stages, computes PDC path latencies, and re-verifies the plan hazard-free (`verify_no_hazards`, backed by unit tests and proptests). Hazard checking covers sidechains as well as inputs, and `verify_stage_ids_in_range` rejects any plan carrying a node id the executor could not index. |
+| `nullherz-mixer` | 1.0k | Console builders: `create_4channel_mixer`, `create_dj_deck` (A–D logical decks), `create_studio_strip`, `create_aux_bus`, `create_crossfader`, plus topology validation. Each deck strip is Sampler → **pitch slot** → **DNA slot** → Gain → Biquad → StereoUtility → *(one FX insert slot)* → DjIsolator, **stereo at every hop** (an L/R buffer pair per stage, `link_stereo` in `dj.rs`), ending in private per-deck L/R buffers plus stereo cue-bus sends; each deck also owns a live SEQUENCER node (`deck_x_sequencer`, trigger generator for DNA groove micro-timing — it needs an output edge to tick). The master chain sums per side (`master_sum_l`/`master_sum_r`, named for telemetry) with the preview sampler mixed in as a summing input, then runs stereo through `master_eq` (a `MASTERING_EQ` node — the mastering view's LOW/MID/HIGH knobs bind to it by name, params 0/1/2, linear gain) into `master_limiter` and out to the master L/R buffers. The four private per-deck cue sends are mixed onto the global cue bus by per-side summing nodes (`cue_sum_l`/`cue_sum_r`) — decks writing the cue buffers directly was a four-producer overwrite where only deck D survived. A named `capture_node` taps the master as a pure consumer for live capture into the sample registry/library. Node and buffer IDs come from the shared `IdAllocator` (separate address spaces). Emits command batches; owns no DSP. |
+| `control-plane` | 0.1k | Thin utility layer (largely superseded by conductor; minimal code). |
+| `nullherz-setup` | 0.1k | Setup binary (config bootstrap). |
+
+
+#### 1.3.1 Notes on the deck strip, measured 2026-10-08
+
+The two **source slots** (pitch, DNA) boot as `BYPASS` and are swapped **by
+type** when the operator engages something — see §5 for why that replaced an
+unconditional `DnaMorph`/`KeySync` pair and what it bought in latency.
+
+The **FX insert slot boots as a `BIQUAD`, not a `BYPASS`**: the bootstrap passes
+`fx_ids = &[1]` and `ProcessorTypeId(1)` is `BIQUAD`. That is sonically neutral
+because `BiquadFactory` defaults to the identity biquad (`b0=1`, rest 0) — the
+measured ±0.056 dB response flatness is the evidence. The node carries **two**
+names: `deck_<x>_fx1`, and a `deck_<x>_insert` alias for `fx_slot_ids[0]`.
+**One slot per deck is all the bootstrap allocates**, which the UI does not
+reflect — see [`TECHNICAL_DEBT_AND_STUBS.md`](../state/TECHNICAL_DEBT_AND_STUBS.md) §3.1.
+
+Per-node cost of the bootstrapped console
+(`cargo run --release -p nullherz-conductor --example profile_console_nodes`,
+8000 snapshots, 95.97 µs total per block):
+
+| node | ns/block | share | type |
+| :--- | ---: | ---: | :--- |
+| `deck_{a,b,c,d}_sampler` | 13 811–13 910 **each** | **57.8% combined** | Sampler |
+| `master_limiter` | 5 342 | 5.6% | Limiter |
+| `deck_{a,b,c,d}_isolator` | 4 999–5 037 each | 20.8% combined | DjIsolator |
+| `master_eq` | 3 945 | 4.1% | MasteringEq |
+| each `*_filter` / `*_fx1` | ~890 | 0.9% each | Biquad |
+
+**The samplers are the system.** 57.8% of all node time is the 16-tap sinc
+resampler, which is why **voice count, not node count, is the scaling
+constraint** — and why `probe_resampler_quality` reports 32 voices at a realistic
+tempo ratio consuming 45.5% of a 256-frame budget.
 
 ### 1.4 Extensibility & Runtime Hosting
 
 | Crate | LOC | Responsibility |
 | :--- | ---: | :--- |
-| `fx-runtime` | ~0.7k | Sidecar process host: spawns subprocess plugins, wires SHM rings + eventfds, applies RT priority, moves children into a hierarchical `nullherz` cgroup with real RSS memory limits (SC-4), and hosts WASM guests via `wasmtime` (`wasm_runtime.rs`) with a fuel/epoch `resource_limiter`. |
-| `sidecar-sdk` | ~0.5k | Guest-side SDK: `SidecarHost` main-loop that connects SHM, implements Sidecar Protocol V2 framing, and drives a user-supplied `AudioProcessor`. Unified Sidecar primitive and store architecture detailed in [`SIDECAR_ECOSYSTEM_SPECIFICATION.md`](./SIDECAR_ECOSYSTEM_SPECIFICATION.md). |
-| `sidecar-macros` | ~0.1k | Attribute macros for declaring sidecar processors/params. |
+| `fx-runtime` | 0.7k | Sidecar process host: spawns subprocess plugins, wires SHM rings + eventfds, applies RT priority, moves children into a hierarchical `nullherz` cgroup with real RSS memory limits (SC-4), and hosts WASM guests via `wasmtime` (`wasm_runtime.rs`) with a fuel/epoch `resource_limiter`. |
+| `sidecar-sdk` | 3.2k | Guest-side SDK: `SidecarHost` main-loop that connects SHM, implements Sidecar Protocol V2 framing, and drives a user-supplied `AudioProcessor`. Unified Sidecar primitive and store architecture detailed in [`SIDECAR_ECOSYSTEM_SPECIFICATION.md`](./SIDECAR_ECOSYSTEM_SPECIFICATION.md). |
+| `sidecar-macros` | 0.1k | Attribute macros for declaring sidecar processors/params. |
 
 ### 1.5 Intelligence / DNA Plane & Transformation Engine
 
 | Crate | LOC | Responsibility |
 | :--- | ---: | :--- |
-| `nullherz-dna` | ~1.8k | `SoundDNA` schema (16-D latent space, rhythmic/spatial profiles), ed25519-signed lineages (`SignedSoundDna`, `verify_signature`/`verify_lineage`), `LibraryDatabase` on `redb` with Smart-Crate trait filtering, `SampleRegistry` (atomic-swap, lock-free reader), `GeneticLibrary`, `CloudPeerSync` — a TCP gossip overlay with Gossipsub-style mesh links (GRAFT/GOSSIP_PUB/GOSSIP_SIGNED) and mDNS-style discovery, the **Musical DNA Architecture Specification** ([`MUSICAL_DNA_ARCHITECTURE_SPECIFICATION.md`](./MUSICAL_DNA_ARCHITECTURE_SPECIFICATION.md)), the **DNS & DNA Glossary** ([`DNS_DNA_GLOSSARY.md`](./DNS_DNA_GLOSSARY.md)), the **Musical Transformation Engine** specification ([`MUSICAL_TRANSFORMATION_ENGINE_SPECIFICATION.md`](./MUSICAL_TRANSFORMATION_ENGINE_SPECIFICATION.md)), the **DNA Instrumentation Specification** ([`DNA_INSTRUMENTATION_AND_TOOLING.md`](./DNA_INSTRUMENTATION_AND_TOOLING.md)) establishing DNA as a routable, modulatable signal domain, and the **Sound Analysis / Perception System Specification** ([`SOUND_ANALYSIS_PERCEPTION_SYSTEM_SPECIFICATION.md`](./SOUND_ANALYSIS_PERCEPTION_SYSTEM_SPECIFICATION.md)) defining the shared multi-timescale real-time audio perception architecture. |
+| `nullherz-dna` | 3.9k | `SoundDNA` schema (16-D latent space, rhythmic/spatial profiles), ed25519-signed lineages (`SignedSoundDna`, `verify_signature`/`verify_lineage`), `LibraryDatabase` on `redb` with Smart-Crate trait filtering, `SampleRegistry` (atomic-swap, lock-free reader), `GeneticLibrary`, `CloudPeerSync` — a TCP gossip overlay with Gossipsub-style mesh links (GRAFT/GOSSIP_PUB/GOSSIP_SIGNED) and mDNS-style discovery, the **Musical DNA Architecture Specification** ([`MUSICAL_DNA_ARCHITECTURE_SPECIFICATION.md`](./MUSICAL_DNA_ARCHITECTURE_SPECIFICATION.md)), the **DNS & DNA Glossary** ([`DNS_DNA_GLOSSARY.md`](./DNS_DNA_GLOSSARY.md)), the **Musical Transformation Engine** specification ([`MUSICAL_TRANSFORMATION_ENGINE_SPECIFICATION.md`](./MUSICAL_TRANSFORMATION_ENGINE_SPECIFICATION.md)), the **DNA Instrumentation Specification** ([`DNA_INSTRUMENTATION_AND_TOOLING.md`](./DNA_INSTRUMENTATION_AND_TOOLING.md)) establishing DNA as a routable, modulatable signal domain, and the **Sound Analysis / Perception System Specification** ([`SOUND_ANALYSIS_PERCEPTION_SYSTEM_SPECIFICATION.md`](./SOUND_ANALYSIS_PERCEPTION_SYSTEM_SPECIFICATION.md)) defining the shared multi-timescale real-time audio perception architecture. |
 
 ### 1.6 UI Plane
 
 | Crate | LOC | Responsibility |
 | :--- | ---: | :--- |
-| `nullherz-inspector` | ~6.4k | `egui`/`eframe` desktop app. Views: DJ Studio (mixer, waveform, transport, performance, DNA), Composer (endless-scroll step grid with sequencer routing and per-step playback telemetry), Audio Editor (waveform selection, OLA time-stretch, transient chop, non-destructive undo), Sampler, Library, Breeder (2-D transfusion pad), Genetic Cloud, Topology, Mastering, Player, Broadcast, Metrics, Account, Modulation, Notifications, Settings (audio/MIDI/network/calibration/preferences). Runs an in-process Conductor and consumes live telemetry. Repaints at a bounded cadence (30 Hz focused / 5 Hz background); resolves every node target by name from the telemetry node map; per-deck track cache avoids per-frame redb reads. Every deck lane renders as a needle view (zoomed auto-scrolling waveform around the playhead). Deck play-state is derived once per NEW telemetry snapshot (gated on `sample_counter` advancing) and only drops after 3 consecutive still snapshots — deriving it per UI frame re-compared the same snapshot against itself and flapped the play/stop toggle mid-playback. |
-| `nullherz-ui-hal` | ~1.0k | Backend-agnostic widget/render layer: knobs, faders, VU meters with asymmetric ballistics, WGPU waveform renderer: filled TriangleStrip body, per-vertex frequency-band color (amber lows / teal mids / icy highs), asymmetric signed envelope, MIP/LOD selection with stride-downsampling (never truncation). |
-| `nullherz-gateway` | ~0.2k | WebSocket bridge (default `127.0.0.1:9001`): broadcasts JSON telemetry to any number of clients (non-blocking broadcaster pattern), accepts JSON `TimestampedCommand`s and library queries. |
-| `nullherz-bench` | ~0.2k | A `main()` stress harness (100k redb inserts + matchmaker ranking). Not Criterion — there is no `criterion` dependency anywhere in the workspace. |
-| `nullherz-backends` | ~1.1k | Audio I/O drivers: **ALSA, PipeWire, JACK, Threaded (software clock), Mock** — hot-swappable at runtime via `AudioBackendType`. Baremetal hardware opportunities (direct MMAP, kernel bypass, `no_std`, AF_XDP/RDMA, HugePages) are detailed in [`BAREMETAL_LATENCY_OPPORTUNITIES.md`](./BAREMETAL_LATENCY_OPPORTUNITIES.md). |
+| `nullherz-inspector` | 23.3k | `egui`/`eframe` desktop app. Views: DJ Studio (mixer, waveform, transport, performance, DNA), Composer (endless-scroll step grid with sequencer routing and per-step playback telemetry), Audio Editor (waveform selection, OLA time-stretch, transient chop, non-destructive undo), Sampler, Library, Breeder (2-D transfusion pad), Genetic Cloud, Topology, Mastering, Player, Broadcast, Metrics, Account, Modulation, Notifications, Settings (audio/MIDI/network/calibration/preferences). Runs an in-process Conductor and consumes live telemetry. Repaints at a bounded cadence (30 Hz focused / 5 Hz background); resolves every node target by name from the telemetry node map; per-deck track cache avoids per-frame redb reads. Every deck lane renders as a needle view (zoomed auto-scrolling waveform around the playhead). Deck play-state is derived once per NEW telemetry snapshot (gated on `sample_counter` advancing) and only drops after 3 consecutive still snapshots — deriving it per UI frame re-compared the same snapshot against itself and flapped the play/stop toggle mid-playback. |
+| `nullherz-ui-hal` | 1.6k | Backend-agnostic widget/render layer: knobs, faders, VU meters with asymmetric ballistics, WGPU waveform renderer: filled TriangleStrip body, per-vertex frequency-band color (amber lows / teal mids / icy highs), asymmetric signed envelope, MIP/LOD selection with stride-downsampling (never truncation). |
+| `nullherz-gateway` | 0.2k | WebSocket bridge (default `127.0.0.1:9001`): broadcasts JSON telemetry to any number of clients (non-blocking broadcaster pattern), accepts JSON `TimestampedCommand`s and library queries. |
+| `nullherz-bench` | 0.3k | A `main()` stress harness (100k redb inserts + matchmaker ranking). Not Criterion — there is no `criterion` dependency anywhere in the workspace. |
+| `nullherz-backends` | 2.4k | Audio I/O drivers: **ALSA, PipeWire, JACK, Threaded (software clock), Mock** — hot-swappable at runtime via `AudioBackendType`. Baremetal hardware opportunities (direct MMAP, kernel bypass, `no_std`, AF_XDP/RDMA, HugePages) are detailed in [`BAREMETAL_LATENCY_OPPORTUNITIES.md`](./BAREMETAL_LATENCY_OPPORTUNITIES.md). |
 
 ### 1.7 Sidecars (out-of-process / guest DSP)
+
+**23 sidecar binaries** (re-counted 2026-10-08; the last refresh listed 8). The
+one-file ones are **not stubs** — a sidecar `main.rs` is an argv shell
+(`cmd_shm`, `sig_shm`, in/out SHM lists, eventfd) around a processor implemented
+in `sidecar-sdk/src/store.rs` and driven by `SidecarHost::run`. The DSP lives in
+the shared SDK; the binary is the process boundary.
 
 | Sidecar | Purpose |
 | :--- | :--- |
@@ -72,6 +141,21 @@ This document describes *what is actually in the tree*, as opposed to the strate
 | `reference_dsp` | Minimal reference effect using `sidecar-sdk`. |
 | `nullherz-dummy` | Pass-through processor for conformance/failover testing. |
 | `nullherz-template` | Copy-me starting point for third-party sidecar authors. |
+| `algorithmic-delay`, `algorithmic-eq`, `algorithmic-synth` | Audio insert / instrument sidecars over `sidecar-sdk` store processors. |
+| `neural-saturation`, `neural-filter`, `neural-latent-manifold` | Neural audio insert sidecars. |
+| `neural-visuals`, `reaction-diffusion-nn`, `shader-particle-swarm`, `bioluminescent-fluid-flow`, `abstract-quantum-swarm`, `neural-floral-mycelium` | Visual generator sidecars. |
+| `fft-spectrum-mesh`, `phase-goniometer-2d`, `harmonic-arrangement-lattice` | Analysis-driven visual sidecars. |
+
+> **The out-of-process path is unexercised by the shipped catalogue.** The Store
+> view maps every descriptor id it ships (`"neural-saturation"`,
+> `"algorithmic-delay"`, `"algorithmic-reverb"`, …) to an **in-process**
+> `ProcessorTypeId` and issues `SwapProcessor`; only an *unmatched* id falls
+> through to `CoreCommand::HotLoadSidecar`
+> ([`store.rs:470`](../../crates/nullherz-inspector/src/views/store.rs:470)). So
+> the cgroup RSS limits, the `wasmtime` fuel limiter and the whole
+> crash-isolation story in `fx-runtime` are reached by nothing in the catalogue,
+> and no test asserts a sidecar crash is survived end to end. The performance
+> decision is defensible; the untested guarantee is tracked as debt §3.5.
 
 ---
 
