@@ -97,6 +97,8 @@
 | **DNA Breeder UI** | ✅ | 4-parent multi-donor breeder slots (Carrier, Modulator, Texture, Groove) with Expected Offspring previews. |
 | **Visual Mixer View** | ✅ | Modular visual channels with 64-neuron Spiking Neural Networks, per-pixel warp feedback, detached windows. |
 | **Sidecar Store View** | ✅ | Sidebar/tab view rendering interactive tag filters (`insert`, `instrument`, `neural`, `delay`, `visual`, `eq`). |
+| **Deck FX Insert Rack** | ✅ | 4 positional slots per deck, each bound to a `deck_<x>_fx<n>` node: load/remove via `SwapProcessor` (empty = `BYPASS`), reorder as a real topology edit, per-slot ramped `SetParam`. Bounded by the graph — a full rack disables the load button rather than overwriting a slot. |
+| **Pad Subchannel Strips** | ⚠️ | Display only. The graph has one `drum_machine_node` and no per-pad strip, so the pad rack, fader, GAIN, PITCH and EQ write UI state and reach no processor. Remove/reorder disabled; see debt §1.7. |
 
 ---
 

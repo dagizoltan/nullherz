@@ -73,6 +73,33 @@ This document lists the open technical debt, stubs, and prototype logic verified
   - *Location*: `crates/nullherz-inspector/src/views/breeder.rs`.
   - *Detail*: The transfusion progress bar displays linear progress but lacks real-time sub-block DSP pipeline feedback metrics from the execution plane.
 
+### 1.7 Deck FX Rack — **RESOLVED** / Pad Subchannel Strips — **OPEN**
+
+- **Deck FX insert rack — RESOLVED**:
+  - *Location*: `crates/nullherz-mixer/src/lib.rs` (`DECK_FX_SLOT_COUNT`), `crates/nullherz-inspector/src/fx_rack.rs`, `views/mixer.rs`, `views/store.rs`, `views/library.rs`, `views/channel_detail.rs`.
+  - *Detail*: The rack was `[Vec<String>; 16]` — an unbounded list of LABELS — over a graph with exactly **one** FX node per deck (`create_dj_deck(deck, &[1], bus)`). Four defects compounded:
+    1. Every load past the first resolved `deck_<x>_fx<n>` for an `n` with no node, fell back to the `deck_<x>_insert` alias, and silently **replaced** the previous effect while the UI list grew.
+    2. `DeckState::default()` seeded three labels (`TRIM / GAIN`, `3-BAND EQ`, `PITCH / SPEED`) that were not nodes. The renderer identified them by string-matching the label (`name_upper.contains("TRIM")`) and re-pointed their knobs at the real gain and isolator nodes — so `fx_slot_idx` started at 3 and the **first** real load already took the fallback path. `PITCH / SPEED` wrote `channel_pitch`, which nothing reads.
+    3. `✕` called `Vec::remove` on the label list only: the processor stayed in the graph, still audible, with nothing left to control it. `▲`/`▼` swapped labels and left the graph untouched.
+    4. The generic knob rendered with no `command_sender.send` anywhere near it, so every hot-loaded effect ran at its construction defaults for the session. `views/library.rs` was worse still — its two "LOAD TO DECK" sites pushed a label and sent **no command at all**.
+  - *Resolution*: Four `BYPASS` slots per deck (`DECK_FX_SLOT_COUNT`), and the rack is now **positional** — slot `i` of deck `d` *is* node `deck_<d>_fx<i+1>`, so there is no index arithmetic to get wrong and no list that can disagree with the graph. `DeckState::deck_fx: [[Option<DeckInsert>; 4]; 16]` replaces both label vectors; trim and the 3-band isolator have their own explicit UI. Remove issues `SwapProcessor` back to `BYPASS`; reorder swaps the slots and re-installs both nodes; knobs send `MixerCommand::SetParam` with `ramp_duration_samples: 128`. The `.unwrap_or(i as u32 * 4 + 2)` fallback is deleted — on deck A it computed node 2, which is deck A's `dna_slot`.
+  - *Cost*: 59 → **71** of `MAX_NODES` (128) and 96 → **120** of `MAX_BUFFERS` (240); measured with `cargo run -p nullherz-mixer --example graph_budget` and held by `test_fx_slots_fit_the_node_budget`. Twelve `BYPASS` nodes at ~0.47 µs/block each is ~5.6 µs against a 196 µs console block (`profile_console_nodes`) — a buffer copy per slot, not literally free, but under 3%.
+  - *Gate*: `reachability_gate_test.rs` now requires `deck_<x>_fx1..fx4` (plus `pitch_slot`, `dna_slot`, `stem_matrix`). The missing `fx<n>` suffix is precisely how this survived a gate built to catch it: the lookup went through `format!`, so the literal scraper could not see it, and the explicit list that covers `format!` lookups did not name it.
+
+- **`get_node_id(..).unwrap_or(..)` as a class — RESOLVED**:
+  - *Location*: `crates/nullherz-conductor/tests/reachability_gate_test.rs` (`scan_defaulted_lookups`), `crates/nullherz-inspector/src/views/composer.rs`.
+  - *Detail*: `test_ui_views_do_not_hardcode_node_indices` only matched `node_idx: <digit>` in a struct literal, so it could not see a hardcoded index that arrived through a variable binding and arithmetic. The gate now also rejects any `get_node_id(..)` chain ending in `unwrap_or*`. Adding that check immediately found three live instances in `composer.rs`, all `.unwrap_or(70)` — `AGENTS.md` describes sequencer ids 70–73 as logical sentinels that are safe for being **above** `MAX_NODES`, but `MAX_NODES` is 128 and the console allocates 71 nodes, so 70 is a real node and those commands were misdirected rather than dropped. All three now skip.
+
+- **Pad subchannel strips are a mockup — OPEN**:
+  - *Location*: `crates/nullherz-inspector/src/views/mixer.rs` — `render_sampler_subchannel_fx_item`, `render_pad_subchannel_strips`, `render_custom_subchannel_fx_item`.
+  - *Detail*: The deck rack's fix does not transfer, because there is nothing to point these at. The graph has **one** `drum_machine_node` and no per-pad strip: every control on a pad subchannel — the FX rack, the fader, GAIN, PITCH, and the three EQ bands — writes `app.sampler.*` / `app.mixer.custom_subchannel_*` and is read by nothing. Verified: no `command_sender.send` anywhere in the pad strip, and no `sampler_pad_*` name in `MixerManager::node_names`.
+  - *Why not fixed here*: 16 pads at the deck strip's shape is 16 nodes for gain alone and 64 for four insert slots each, against 57 nodes of headroom. This needs a design decision — a shared pad bus, a smaller slot count, or a sub-mixer the pads render into — not a wiring patch. The remove/reorder buttons are **disabled** in the interim so they do not imply a graph edit they cannot perform.
+
+- **Other display-only strip controls — OPEN**:
+  - `channel_balance` ("PAN") is read only by the VU meter's left/right split; the deck graph has no pan stage. Tooltipped as display-only.
+  - `channel_pitch` is written by nothing now that the seeded `PITCH / SPEED` rack entry is gone, and was never read.
+  - The DNA "SHAPE" checkbox (`views/dj_studio/dna.rs`) resolves `deck_<x>_dna_morph`, a name `MixerManager` **no longer registers** (the permanent DnaMorph node was replaced by the swappable `dna_slot`). It therefore does nothing. Engaging DNA should be a `SwapProcessor` on `deck_<x>_dna_slot` to `DNA_MORPH`, which is a feature decision rather than a rename; adding `dna_morph` to the gate's suffix list would turn it red today.
+
 ---
 
 ## 2. Resolved Architectural Hardenings (Kept for Context)

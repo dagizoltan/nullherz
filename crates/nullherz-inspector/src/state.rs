@@ -381,10 +381,16 @@ pub struct DeckState {
     /// turntable-style.
     #[allow(dead_code)]
     pub deck_key_lock: [bool; 16],
-    /// Active sidecar insert FX attached to each deck channel (unlimited amount per channel).
-    pub deck_inserts: [Vec<String>; 16],
-    /// Parameter state values for each active deck insert.
-    pub deck_insert_params: [Vec<[f32; 8]>; 16],
+    /// The deck FX rack: POSITIONAL slots, one per `deck_<x>_fx<n>` node.
+    ///
+    /// Slot `i` of deck `d` is the graph node `deck_<d>_fx<i+1>`, so the rack
+    /// cannot hold an effect the audio path does not have. This replaced an
+    /// unbounded `[Vec<String>; 16]` of labels over a graph with one FX node per
+    /// deck — see `crate::fx_rack` for what that mismatch cost.
+    ///
+    /// Indexed by DECK, not by channel strip: strips past the fourth fold with
+    /// `% fx_rack::DECK_COUNT`, matching the strip renderer.
+    pub deck_fx: [crate::fx_rack::DeckFxSlots; 16],
 }
 
 impl Default for DeckState {
@@ -403,16 +409,14 @@ impl Default for DeckState {
             deck_sync: [false; 16],
             deck_key_sync: [false; 16],
             deck_key_lock: [false; 16],
-            deck_inserts: std::array::from_fn(|_| vec![
-                "TRIM / GAIN".to_string(),
-                "3-BAND EQ".to_string(),
-                "PITCH / SPEED".to_string(),
-            ]),
-            deck_insert_params: std::array::from_fn(|_| vec![
-                [1.0; 8],
-                [1.0; 8],
-                [1.0; 8],
-            ]),
+            // Empty. The rack used to be seeded with three labels that were
+            // not nodes — `TRIM / GAIN`, `3-BAND EQ`, `PITCH / SPEED` — which
+            // the renderer recognised by string-matching the label and
+            // re-pointed at the gain and isolator nodes. The cost was that the
+            // first REAL effect load started at index 3 and looked up a slot
+            // that did not exist. Trim and EQ are strip controls with their own
+            // explicit UI now (`render_channel_gain_eq`), not rack entries.
+            deck_fx: std::array::from_fn(|_| crate::fx_rack::empty_slots()),
         }
     }
 }
