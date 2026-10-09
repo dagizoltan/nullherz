@@ -48,9 +48,14 @@ Three things are, on measurement, below the standard the engine sets:
    synchronous ALSA device enumeration on `Conductor::tick()`. Fixed by moving
    enumeration to a background thread; the report's own attribution of the cost
    was wrong and is corrected in §3.2. (§3)
-2. **The deck FX rack is presentational.** The engine allocates **one** FX slot
-   per deck; the UI presents an unbounded, reorderable, removable rack whose
-   remove, reorder, and parameter controls emit no commands at all. (§5.1)
+2. **The deck FX rack was presentational; the deck half is now wired.** The
+   engine allocated **one** FX slot per deck while the UI presented an
+   unbounded, reorderable, removable rack whose remove, reorder and parameter
+   controls emitted no commands at all. It is now four positional slots per deck
+   (`DECK_FX_SLOT_COUNT`) with every control routed through `fx_rack.rs`. The
+   **pad-subchannel** half remains presentational and is a different defect — no
+   per-pad nodes exist at all — tracked as `TECHNICAL_DEBT_AND_STUBS.md` §3.1.
+   (§5.1)
 3. **The time-domain effects are placeholder-grade** against the resampler's
    standard: a reduced Freeverb hardcoded to 44.1 kHz with an identical impulse
    response in both channels (a stereo reverb with zero stereo width), and no
@@ -519,7 +524,7 @@ it was 28.7 ms when every deck carried a 1024-point vocoder unconditionally.
 
 ## 5. Chief Sound Designer audit: what an operator can actually reach
 
-### 5.1 🔴 The deck FX rack is a façade
+### 5.1 ✅ The deck FX rack was a façade — deck half fixed, pad subchannels open
 
 > **Status since this audit:** resolved for the DECK rack — four positional
 > slots per deck, every control wired. The pad-subchannel half is open and
@@ -584,7 +589,7 @@ Knobs/faders versus command sends, per view:
 | `organism_editor.rs` | 18 | **0** | edits an in-memory organism; only outbound path is `std::fs::write` of JSON at line 207 |
 | `visuals.rs` | 8 | **0** | writes `visual_preset_N.json` **into the process CWD**, not `storage/` |
 | `settings/preferences.rs` | 6 | **0** | prefs file, by design |
-| `mixer.rs` | 38 | 14 | includes the §5.1 façade |
+| `mixer.rs` | 38 | 14 | counted while the §5.1 façade stood; the deck rack's controls now send, the pad-subchannel ones still do not |
 | `channel_detail.rs` | 8 | 5 | |
 | `sampler.rs` | 9 | 8 | healthiest ratio in the tree |
 | `player.rs`, `library.rs`, `topology.rs`, `settings/audio.rs` | 0–1 | 7–12 | command-only views, correct |
@@ -652,8 +657,8 @@ see it.
 
 | # | Issue | Location | Evidence |
 | :--- | :--- | :--- | :--- |
-| 2 | Deck FX rack: 1 engine slot vs unlimited UI; silent replacement; remove/reorder/params emit nothing | `mixer.rs:160`, `store.rs:462`, `state.rs:406`, `nullherz-mixer/src/lib.rs:284` | §5.1 |
-| 3 | Hardcoded node-index fallback `i*4+2` in a view — latent `AGENTS.md` §3 violation | `store.rs:468`, `store.rs:730` | §5.1(c) |
+| 2 | ~~Deck FX rack: 1 engine slot vs unlimited UI; silent replacement; remove/reorder/params emit nothing~~ **RESOLVED for the deck rack:** 4 positional slots per deck (`DECK_FX_SLOT_COUNT`), every mutation owned by `fx_rack.rs`, 10 unit tests. **Still open:** the pad-subchannel rack, a different defect (no per-pad nodes exist) — see debt §3.1 | `fx_rack.rs`, `nullherz-mixer/src/lib.rs` | §5.1; debt §4 |
+| 3 | ~~Hardcoded node-index fallback `i*4+2` in a view — latent `AGENTS.md` §3 violation~~ **RESOLVED.** The fallback is gone; the only remaining occurrences of the expression are comments recording the defect. `scan_defaulted_lookups` in `reachability_gate_test.rs` now rejects the *form*, not just the literal | `store.rs` (comments only), `reachability_gate_test.rs` | §5.1(c); debt §4 |
 | 4 | Reverb hardcoded to 44.1 kHz; `ReverbFactory` discards `_sample_rate`; no `transport` read, no `setup()` | `algorithmic_reverb.rs`, `factory.rs:443` | §4.4 |
 | 5 | Reverb channels share delay lengths and phase → zero stereo width | `algorithmic_reverb.rs:52` | §4.4 |
 | 6 | `NeuralFilterProcessor` hardcodes `sample_rate = 48000.0` **inside `process()`** — cutoff wrong at every other rate | `neural_filter.rs:40` | grep |
@@ -670,7 +675,7 @@ see it.
 | 12 | KeySync bin-rounding remap is timbral (7.65 dB partial spread); needs time-stretch + resample | `keysync.rs`, `probe_keysync_quality` | §4.4 |
 | 13 | Limiter 1.2% THD at 60 Hz under 6 dB limiting — single-stage, no program-dependent release | `limiter.rs` | §4.4 |
 | 14 | Sidecar out-of-process path unexercised by the shipped catalogue; no end-to-end crash-survival test | `store.rs:470` | §5.4 |
-| 15 | Reachability gate cannot see `format!` node names — `fx<n>` absent from the explicit list | `reachability_gate_test.rs:160` | §5.3 |
+| 15 | ~~Reachability gate cannot see `format!` node names — `fx<n>` absent from the explicit list~~ **RESOLVED.** The required-names list is derived from `1..=DECK_FX_SLOT_COUNT`, so `deck_<x>_fx1..fx4` are covered and stay covered if the slot count changes | `reachability_gate_test.rs` | §5.3; debt §4 |
 
 ### P3 — correctness of the record
 
@@ -698,8 +703,8 @@ its own `Arc` (latent, now that the manager is wired).
 | # | Action | Why this order | Cost |
 | ---: | :--- | :--- | :--- |
 | 1 | ~~Move ALSA enumeration off `tick()` (+ `OnceLock` the lib handle)~~ **DONE.** Note for the record: the `OnceLock` was *not* sufficient on its own (§3.4) — the background thread is what cleared the budget | The gate is the thing that makes every other number trustworthy. Nothing else should be merged over a red gate. | done |
-| 2 | Allocate 4 `fx_ids` per deck; wire remove/reorder/`SetParam` to commands; drop the three seeded label-inserts; delete the `unwrap_or(i*4+2)` fallback | Turns the 16 "available for FX chains" processors from reachable into usable. Highest value-per-hour in the report. | days |
-| 3 | Add `fx1..fxN` to the reachability gate's explicit name list | Makes (2) stay fixed. A gate that cannot see `format!` names will let it regress. | minutes |
+| 2 | ~~Allocate 4 `fx_ids` per deck; wire remove/reorder/`SetParam` to commands; drop the three seeded label-inserts; delete the `unwrap_or(i*4+2)` fallback~~ **DONE** for the deck rack. The equivalent work for pad subchannels is still open and is larger: there are no per-pad nodes to wire to yet | Turns the 16 "available for FX chains" processors from reachable into usable. Highest value-per-hour in the report. | done (decks) |
+| 3 | ~~Add `fx1..fxN` to the reachability gate's explicit name list~~ **DONE**, and derived from `DECK_FX_SLOT_COUNT` rather than written out, so it tracks the slot count | Makes (2) stay fixed. A gate that cannot see `format!` names will let it regress. | done |
 | 4 | Give the reverb a sample rate: scale delays from `ctx.transport.sample_rate`, add stereo spread, go to 8+4 combs/allpasses | Cheapest audible quality win in the tree, and (1)+(2) make it reachable enough to matter | days |
 | 5 | Add a 2× oversampling wrapper usable by the saturators and the limiter | Unlocks true-peak limiting and non-aliasing saturation in one primitive | week |
 | 6 | Characterise the 32-track tail with repeats on an isolated machine before claiming any track count above 16 | `AGENTS.md` §4: *"take REPEATS: tail statistics on a machine without core isolation are not stable enough for a single A/B"* | days |
@@ -714,6 +719,14 @@ command path all survived this audit without a finding against them.
 
 ## 8. Audit conditions and caveats
 
+* **Last re-verified against the tree: 2026-10-09.** Findings are claims about a
+  commit, and this file outlived three of its own: the deck FX rack (§5.1, P1 2),
+  the `unwrap_or(i*4+2)` node-index fallback (P1 3) and the reachability gate's
+  blindness to `format!`-built names (P2 15) were all fixed in the tree and
+  recorded closed in `TECHNICAL_DEBT_AND_STUBS.md` §4 while this report still
+  listed them open — in one case contradicting a status banner a few lines above
+  the finding itself. Re-verify before citing any row here, and prefer the test
+  named in debt §4 over the prose in this file.
 * **Machine:** Linux 7.0.0-34-generic, x86_64, AVX2+FMA (`AudioEngine: DSP SIMD
   path = avx2+fma`). **No core isolation.** Load average during the §4.6 runs
   was 7–16 because of concurrent builds; the single-run tails there are
