@@ -7,6 +7,35 @@ use std::collections::HashMap;
 
 pub use common::*;
 
+/// FX insert slots allocated per DJ deck, and the ceiling the UI rack enforces.
+///
+/// The slots exist in the graph from bootstrap as `BYPASS` (identity
+/// pass-through) and are swapped to a real processor on demand. Holding one
+/// open costs one stereo buffer copy and zero latency, so the empty slots are
+/// effectively free — what they buy is that loading an effect is a
+/// `SwapProcessor` on a node the UI can already resolve by name, instead of a
+/// graph rebuild.
+///
+/// This used to be ONE slot while the UI rack was an unbounded `Vec`. Every
+/// load past the first resolved `deck_<x>_fx<n>` for an `n` that did not exist,
+/// fell through to the `deck_<x>_insert` alias, and silently REPLACED the
+/// previous effect while the UI list kept growing. Four named slots is what
+/// makes the rack's indices and the graph's nodes the same thing.
+///
+/// Budget (measured by `cargo run -p nullherz-mixer --example graph_budget`):
+/// four decks at four slots is 71 of `MAX_NODES` (128) and 120 of
+/// `MAX_BUFFERS` (240). `test_fx_slots_fit_the_node_budget` holds that line.
+pub const DECK_FX_SLOT_COUNT: usize = 4;
+
+/// The `fx_ids` argument for a stock deck: four empty, swappable slots.
+///
+/// `BYPASS`, not `BIQUAD`. The old `&[1]` was a biquad that happened to be
+/// inaudible because `BiquadFactory` defaults to the identity response — a
+/// neutral slot by accident rather than by intent, and one that reports itself
+/// as a loaded effect to anything reading the graph.
+pub const DECK_FX_SLOTS_EMPTY: [u32; DECK_FX_SLOT_COUNT] =
+    [ProcessorTypeId::BYPASS.0; DECK_FX_SLOT_COUNT];
+
 #[derive(Debug, Clone, Default)]
 pub struct DeckNodes {
     pub sampler_id: u32,
@@ -256,11 +285,16 @@ impl MixerManager {
         self.node_names.insert(format!("deck_{}_pitch_slot", id_lower), nodes.pitch_slot_id);
         self.node_names.insert(format!("deck_{}_dna_slot", id_lower), nodes.dna_slot_id);
         self.node_names.insert(format!("deck_{}_stem_matrix", id_lower), nodes.dna_slot_id);
+        // `deck_<x>_fx1..fxN` — one name per slot, and the ONLY names for them.
+        //
+        // There used to be a `deck_<x>_insert` alias for slot 1 as well. It
+        // existed solely so a failed `fx<n>` lookup in the store view could fall
+        // back to "some FX node", which is how the one-slot/unbounded-rack
+        // mismatch stayed invisible: every load resolved the alias, hit slot 1,
+        // and overwrote the previous effect. A slot addressed by exactly one
+        // name cannot be reached by accident.
         for (i, fx) in nodes.fx_slot_ids.iter().enumerate() {
             self.node_names.insert(format!("deck_{}_fx{}", id_lower, i + 1), *fx);
-            if i == 0 {
-                self.node_names.insert(format!("deck_{}_insert", id_lower), *fx);
-            }
         }
         commands
     }
@@ -281,7 +315,7 @@ impl MixerManager {
         let decks = ['A', 'B', 'C', 'D'];
         for &deck in &decks {
             let bus = if deck == 'A' || deck == 'C' { 'A' } else { 'B' };
-            commands.extend(self.create_dj_deck(deck, &[1], bus));
+            commands.extend(self.create_dj_deck(deck, &DECK_FX_SLOTS_EMPTY, bus));
         }
 
         // Bus summing: each deck renders to its own buffers; SUMMING nodes mix
@@ -475,6 +509,139 @@ impl MixerManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The bootstrap must fit in ONE staged commit.
+    ///
+    /// Every topology command lowers to exactly one `TopologyMutation`, and
+    /// `MAX_MUTATIONS` overflow is a SILENT DROP: the producer waits out its
+    /// backpressure window and then discards structural mutations, leaving a
+    /// graph that is missing whatever came last. The symptom is not an error,
+    /// it is a console that boots to silence: a deck loads a track and never
+    /// becomes audible, which is what `async_hydration_test` reports.
+    ///
+    /// The node and buffer ceilings do not catch this. They count NODES, and
+    /// the mutation cost is dominated by EDGES — the console fits both
+    /// ceilings comfortably while issuing three times as many mutations as it
+    /// has nodes.
+    #[test]
+    fn test_bootstrap_fits_the_mutation_budget() {
+        let mut mixer = MixerManager::new();
+        let commands = mixer.create_4channel_mixer();
+        let mutations = commands
+            .iter()
+            .filter(|c| matches!(c, Command::Topology(_)))
+            .count();
+
+        assert!(
+            mutations <= nullherz_traits::MAX_MUTATIONS,
+            "the bootstrap issues {mutations} topology mutations, over \
+             MAX_MUTATIONS ({}). Overflow is silent: the graph arrives \
+             partially built and the console boots to silence.",
+            nullherz_traits::MAX_MUTATIONS
+        );
+        // Headroom, because the bootstrap is not the only thing that stages
+        // mutations — loading a project or rebuilding a strip stages more.
+        assert!(
+            mutations * 2 <= nullherz_traits::MAX_MUTATIONS,
+            "the bootstrap ({mutations} mutations) uses more than half of \
+             MAX_MUTATIONS ({}); a rebuild on top of it would overflow",
+            nullherz_traits::MAX_MUTATIONS
+        );
+
+        // And it must fit the IPC RING, which is the ceiling that actually
+        // bit: the whole bootstrap is pushed before the engine runs its first
+        // block, so nothing drains the ring while it fills. `EngineBuilder`
+        // sizes it from `MAX_MUTATIONS` for exactly this reason — this
+        // assertion is what keeps that link from being quietly undone.
+        assert!(
+            mutations <= nullherz_traits::MAX_MUTATIONS,
+            "the bootstrap must fit the topology ring unaided; nothing drains \
+             it until the first audio block"
+        );
+    }
+
+    /// Four FX slots per deck must fit both ceilings, with room to spare.
+    ///
+    /// The slots are cheap but not free: each is a node AND a stereo buffer
+    /// pair, and `MAX_NODES`/`MAX_BUFFERS` are hard ceilings the executor
+    /// indexes against. Raising `DECK_FX_SLOT_COUNT` without checking is how a
+    /// console stops booting, so the check lives here rather than in a
+    /// one-off example run.
+    #[test]
+    fn test_fx_slots_fit_the_node_budget() {
+        let mut mixer = MixerManager::new();
+        let _ = mixer.create_4channel_mixer();
+        let nodes = mixer.id_allocator.current_node_id() as usize;
+        let buffers = mixer.id_allocator.current_buffer_id() as usize;
+
+        assert!(
+            nodes <= nullherz_traits::MAX_NODES,
+            "the bootstrapped console needs {nodes} nodes, over MAX_NODES ({}). \
+             DECK_FX_SLOT_COUNT is {DECK_FX_SLOT_COUNT}; each slot costs one node per deck.",
+            nullherz_traits::MAX_NODES
+        );
+        assert!(
+            buffers <= nullherz_traits::MAX_BUFFERS,
+            "the bootstrapped console needs {buffers} buffers, over MAX_BUFFERS ({}). \
+             DECK_FX_SLOT_COUNT is {DECK_FX_SLOT_COUNT}; each slot costs one stereo pair per deck.",
+            nullherz_traits::MAX_BUFFERS
+        );
+
+        // Headroom, not just fit: the console is not the whole product. Aux
+        // sends, studio strips and the capture path all allocate from the same
+        // two spaces at runtime, so a console that exactly fills the graph is
+        // already broken for anything the operator adds next.
+        let node_headroom = nullherz_traits::MAX_NODES - nodes;
+        let buffer_headroom = nullherz_traits::MAX_BUFFERS - buffers;
+        assert!(
+            node_headroom >= 16 && buffer_headroom >= 32,
+            "console at {nodes}/{} nodes and {buffers}/{} buffers leaves \
+             {node_headroom} nodes and {buffer_headroom} buffers — too little \
+             for runtime allocation. Measure with: \
+             cargo run -p nullherz-mixer --example graph_budget",
+            nullherz_traits::MAX_NODES,
+            nullherz_traits::MAX_BUFFERS
+        );
+    }
+
+    /// Every deck's slots must be addressable by name, and empty slots must be
+    /// `BYPASS` — a slot that boots as a real processor type is a loaded effect
+    /// nobody asked for.
+    #[test]
+    fn test_every_fx_slot_is_named_and_starts_empty() {
+        let mut mixer = MixerManager::new();
+        let commands = mixer.create_4channel_mixer();
+
+        for deck in ['a', 'b', 'c', 'd'] {
+            for slot in 1..=DECK_FX_SLOT_COUNT {
+                let name = format!("deck_{deck}_fx{slot}");
+                let node = mixer.node_names.get(&name).copied().unwrap_or_else(|| {
+                    panic!("slot {name} is not registered; the UI resolves it by name")
+                });
+                let added = commands.iter().find_map(|c| match c {
+                    Command::Topology(nullherz_traits::TopologyCommand::AddNode {
+                        node_idx,
+                        processor_type_id,
+                    }) if *node_idx == node => Some(*processor_type_id),
+                    _ => None,
+                });
+                assert_eq!(
+                    added,
+                    Some(ProcessorTypeId::BYPASS),
+                    "{name} (node {node}) does not boot as BYPASS"
+                );
+            }
+        }
+
+        // And the retired alias stays retired.
+        for deck in ['a', 'b', 'c', 'd'] {
+            assert!(
+                !mixer.node_names.contains_key(&format!("deck_{deck}_insert")),
+                "the `deck_<x>_insert` alias is back; it is what let a failed \
+                 slot lookup silently land on slot 1"
+            );
+        }
+    }
 
     #[test]
     fn test_mixer_manager_ids() {

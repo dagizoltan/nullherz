@@ -102,10 +102,16 @@ fn test_node_space_and_mutation_budget_cover_a_full_rebuild() {
         "MAX_NODES ({MAX_NODES}) leaves less than 2x headroom over the current \
          console ({CONSOLE_NODES_TODAY} nodes)"
     );
+    // Nodes alone was never the bound, and asserting it hid a real overflow:
+    // 256 >= 128 passed while the 4-deck bootstrap issued 305 mutations and
+    // silently dropped the tail. A graph needs one mutation per node PLUS one
+    // per edge, and every edge is a buffer endpoint.
     assert!(
-        nullherz_traits::MAX_MUTATIONS >= MAX_NODES,
-        "MAX_MUTATIONS ({}) is below MAX_NODES ({MAX_NODES}); building a full \
-         graph would silently drop mutations",
-        nullherz_traits::MAX_MUTATIONS
+        nullherz_traits::MAX_MUTATIONS >= MAX_NODES + MAX_BUFFERS,
+        "MAX_MUTATIONS ({}) is below MAX_NODES + MAX_BUFFERS ({}); building a \
+         full graph would silently drop mutations, because every node costs one \
+         AddNode plus one mutation per input and output edge",
+        nullherz_traits::MAX_MUTATIONS,
+        MAX_NODES + MAX_BUFFERS
     );
 }

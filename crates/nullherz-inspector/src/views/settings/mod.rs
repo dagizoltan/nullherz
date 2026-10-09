@@ -41,7 +41,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                         let btn = if is_sel {
                             egui::Button::new(RichText::new(&label).strong().size(theme.type_caption).color(theme.accent))
                                 .fill(theme.accent.linear_multiply(0.18))
-                                .stroke(egui::Stroke::new(1.0, theme.accent))
+                                .stroke(egui::Stroke::new(1.0_f32, theme.accent))
                         } else {
                             egui::Button::new(RichText::new(&label).size(theme.type_caption).color(theme.text_primary))
                                 .fill(theme.bg_inset)
