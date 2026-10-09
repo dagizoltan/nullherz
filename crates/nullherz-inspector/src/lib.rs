@@ -222,12 +222,24 @@ impl InspectorApp {
         self.library.bg_library_loader = Some(rx);
 
         std::thread::spawn(move || {
-            let crate_tracks = if let Some(ref name) = crate_name {
-                db.get_tracks_in_crate(name).unwrap_or_default()
-            } else {
-                db.list_tracks().unwrap_or_default()
-            };
+            // One listing, reused when no crate is selected.
+            //
+            // This used to call `list_tracks()` for `crate_tracks` in the `else`
+            // arm and then AGAIN for `all_tracks` — the same query, twice, on
+            // the default path, because `active_crate` starts as `None`.
+            // `list_tracks` deserializes every row in full (peaks plus six MIP
+            // pyramids per track), so it is not cheap to repeat: measured by
+            // `bench_library_listing` on 4-minute tracks, 596 ms at 100 tracks
+            // and 1.24 s at 200, i.e. ~6.2 ms per track, doubled.
+            //
+            // Cloning the vector instead costs a string copy and an `Arc` bump
+            // per track — the waveform payload is behind `Arc<SampleMetadata>`
+            // and is not copied.
             let all_tracks = db.list_tracks().unwrap_or_default();
+            let crate_tracks = match crate_name {
+                Some(ref name) => db.get_tracks_in_crate(name).unwrap_or_default(),
+                None => all_tracks.clone(),
+            };
             let crates = db.list_crates().unwrap_or_default();
             let smart_crates = db.list_smart_crates().unwrap_or_default();
 
