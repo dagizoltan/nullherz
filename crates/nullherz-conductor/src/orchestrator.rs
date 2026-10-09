@@ -1317,8 +1317,14 @@ impl Conductor {
         if self.last_registry_reap_secs == now { return; }
         self.last_registry_reap_secs = now;
 
-        let ids = self.transfusion_manager.sample_registry.list_ids();
-        if ids.is_empty() { return; }
+        // Length first, from the accounted residency: O(1) and no allocation.
+        // This used to call `list_ids()` here, BEFORE the growth check below,
+        // purely to read `.len()` — so an idle session with a large library
+        // walked every shard and allocated an N-element Vec once a second, on
+        // the tick, to compute a number that is now an atomic load. The walk
+        // still happens, but only once the check says there is something to do.
+        let resident = self.transfusion_manager.sample_registry.residency().count as usize;
+        if resident == 0 { return; }
 
         // Point 2 above: a quiet session does no work. The per-id library
         // lookups below are one database read each, and there is nothing to
@@ -1337,13 +1343,16 @@ impl Conductor {
         // more than the sweep it saves, and both sets only shrink through paths
         // that run here. An idle session changes neither and does nothing.
         let analysed_len = self.analysed_ids.lock().len();
-        if ids.len() == self.last_registry_reap_len
+        if resident == self.last_registry_reap_len
             && analysed_len == self.last_analysed_len
         {
             return;
         }
-        self.last_registry_reap_len = ids.len();
+        self.last_registry_reap_len = resident;
         self.last_analysed_len = analysed_len;
+
+        // Only now, having decided to sweep, pay for the id list.
+        let ids = self.transfusion_manager.sample_registry.list_ids();
 
         let pinned: std::collections::HashSet<u64> = self
             .mixer_manager
