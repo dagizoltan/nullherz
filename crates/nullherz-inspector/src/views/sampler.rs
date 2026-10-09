@@ -26,7 +26,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, _telemetry: &Option<Telemetry
     Frame::none()
         .fill(theme.bg_surface)
         .rounding(theme.radius_md)
-        .stroke(Stroke::new(1.0, theme.border))
+        .stroke(Stroke::new(1.0_f32, theme.border))
         .inner_margin(Margin::symmetric(theme.space_md, theme.space_xs))
         .show(ui, |ui| {
             ui.horizontal(|ui| {
@@ -40,7 +40,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, _telemetry: &Option<Telemetry
                         Frame::none()
                             .fill(theme.danger.linear_multiply(0.2))
                             .rounding(theme.radius_sm)
-                            .stroke(Stroke::new(1.0, theme.danger))
+                            .stroke(Stroke::new(1.0_f32, theme.danger))
                             .inner_margin(Margin::symmetric(8.0, 3.0))
                             .show(ui, |ui| {
                                 ui.label(RichText::new("● RECORDING IN PROGRESS").size(10.0).strong().color(theme.danger.gamma_multiply(alpha)));
@@ -49,7 +49,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, _telemetry: &Option<Telemetry
                         Frame::none()
                             .fill(theme.bg_inset)
                             .rounding(theme.radius_sm)
-                            .stroke(Stroke::new(1.0, theme.border_stroke.color))
+                            .stroke(Stroke::new(1.0_f32, theme.border_stroke.color))
                             .inner_margin(Margin::symmetric(8.0, 3.0))
                             .show(ui, |ui| {
                                 ui.label(RichText::new("READY TO CAPTURE").size(10.0).strong().color(theme.success));
@@ -86,7 +86,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, _telemetry: &Option<Telemetry
                 // Waveform Painter
                 let (rect, _response) = ui.allocate_exact_size(Vec2::new(ui.available_width(), 120.0), Sense::hover());
                 ui.painter().rect_filled(rect, theme.radius_sm, theme.bg_dark);
-                ui.painter().rect_stroke(rect, theme.radius_sm, Stroke::new(1.0, theme.border_stroke.color));
+                ui.painter().rect_stroke(rect, theme.radius_sm, Stroke::new(1.0_f32, theme.border_stroke.color));
 
                 if let (Some(wgpu_mtx), Some(wf_mtx)) = (&app.wgpu_renderer, &app.waveform_renderer) {
                     let wgpu = wgpu_mtx.lock();
@@ -115,7 +115,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, _telemetry: &Option<Telemetry
         Frame::none()
             .fill(theme.bg_surface)
             .rounding(theme.radius_md)
-            .stroke(Stroke::new(1.0, theme.border))
+            .stroke(Stroke::new(1.0_f32, theme.border))
             .inner_margin(Margin::same(theme.space_md))
             .show(ui, |ui| {
                 ui.vertical(|ui| {
@@ -165,7 +165,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, _telemetry: &Option<Telemetry
                     Frame::none()
                         .fill(theme.bg_inset)
                         .rounding(theme.radius_sm)
-                        .stroke(Stroke::new(1.0, theme.border_stroke.color))
+                        .stroke(Stroke::new(1.0_f32, theme.border_stroke.color))
                         .inner_margin(Margin::same(theme.space_sm))
                         .show(ui, |ui| {
                             ui.horizontal(|ui| {
@@ -271,7 +271,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, _telemetry: &Option<Telemetry
         Frame::none()
             .fill(theme.bg_surface)
             .rounding(theme.radius_md)
-            .stroke(Stroke::new(1.0, theme.border))
+            .stroke(Stroke::new(1.0_f32, theme.border))
             .inner_margin(Margin::same(theme.space_md))
             .show(ui, |ui| {
                 ui.vertical(|ui| {
@@ -303,7 +303,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, _telemetry: &Option<Telemetry
                             Frame::none()
                                 .fill(theme.bg_inset)
                                 .rounding(theme.radius_sm)
-                                .stroke(Stroke::new(1.0, theme.border_stroke.color))
+                                .stroke(Stroke::new(1.0_f32, theme.border_stroke.color))
                                 .inner_margin(Margin::same(theme.space_xs))
                                 .show(ui, |ui| {
                                     ui.horizontal(|ui| {

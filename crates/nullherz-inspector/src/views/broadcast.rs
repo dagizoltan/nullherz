@@ -18,7 +18,7 @@ fn render_telemetry_card(
     let (rect, _) = ui.allocate_exact_size(Vec2::new(card_w, card_h), Sense::hover());
 
     ui.painter().rect_filled(rect, theme.radius_md, theme.bg_inset);
-    ui.painter().rect_stroke(rect, theme.radius_md, Stroke::new(1.0, theme.border_stroke.color));
+    ui.painter().rect_stroke(rect, theme.radius_md, Stroke::new(1.0_f32, theme.border_stroke.color));
 
     let content_rect = rect.shrink(6.0);
     let mut child_ui = ui.child_ui(content_rect, egui::Layout::left_to_right(egui::Align::Center), None);
@@ -28,7 +28,7 @@ fn render_telemetry_card(
         let badge_size = Vec2::new(32.0, 32.0);
         let (badge_rect, _) = ui.allocate_exact_size(badge_size, Sense::hover());
         ui.painter().rect_filled(badge_rect, theme.radius_sm, accent_color.linear_multiply(0.12));
-        ui.painter().rect_stroke(badge_rect, theme.radius_sm, Stroke::new(1.0, accent_color.linear_multiply(0.4)));
+        ui.painter().rect_stroke(badge_rect, theme.radius_sm, Stroke::new(1.0_f32, accent_color.linear_multiply(0.4)));
         ui.painter().text(
             badge_rect.center(),
             Align2::CENTER_CENTER,
@@ -85,7 +85,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
     Frame::none()
         .fill(theme.bg_surface)
         .rounding(theme.radius_md)
-        .stroke(Stroke::new(1.0, theme.border))
+        .stroke(Stroke::new(1.0_f32, theme.border))
         .inner_margin(Margin::symmetric(theme.space_md, theme.space_xs))
         .show(ui, |ui| {
             ui.horizontal(|ui| {
@@ -96,7 +96,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                     Frame::none()
                         .fill(theme.success.linear_multiply(0.15))
                         .rounding(theme.radius_sm)
-                        .stroke(Stroke::new(1.0, theme.success))
+                        .stroke(Stroke::new(1.0_f32, theme.success))
                         .inner_margin(Margin::symmetric(6.0, 2.0))
                         .show(ui, |ui| {
                             ui.label(RichText::new("SOCKET CONNECTED").size(9.0).strong().color(theme.success));
@@ -115,7 +115,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
             Frame::none()
                 .fill(theme.bg_surface)
                 .rounding(theme.radius_md)
-                .stroke(Stroke::new(1.0, theme.border))
+                .stroke(Stroke::new(1.0_f32, theme.border))
                 .inner_margin(Margin::same(theme.space_md))
                 .show(ui, |ui| {
                     ui.vertical(|ui| {
@@ -169,7 +169,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
             Frame::none()
                 .fill(theme.bg_surface)
                 .rounding(theme.radius_md)
-                .stroke(Stroke::new(1.0, theme.border))
+                .stroke(Stroke::new(1.0_f32, theme.border))
                 .inner_margin(Margin::same(theme.space_md))
                 .show(ui, |ui| {
                     ui.vertical(|ui| {
@@ -215,7 +215,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
             Frame::none()
                 .fill(theme.bg_surface)
                 .rounding(theme.radius_md)
-                .stroke(Stroke::new(1.0, theme.border))
+                .stroke(Stroke::new(1.0_f32, theme.border))
                 .inner_margin(Margin::same(theme.space_md))
                 .show(ui, |ui| {
                     ui.vertical(|ui| {
@@ -253,7 +253,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                         Frame::none()
                             .fill(bg_banner)
                             .rounding(theme.radius_md)
-                            .stroke(Stroke::new(1.0, dot_color.linear_multiply(0.5)))
+                            .stroke(Stroke::new(1.0_f32, dot_color.linear_multiply(0.5)))
                             .inner_margin(Margin::symmetric(12.0, 10.0))
                             .show(ui, |ui| {
                                 ui.horizontal(|ui| {
@@ -297,7 +297,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
             Frame::none()
                 .fill(theme.bg_surface)
                 .rounding(theme.radius_md)
-                .stroke(Stroke::new(1.0, theme.border))
+                .stroke(Stroke::new(1.0_f32, theme.border))
                 .inner_margin(Margin::same(theme.space_md))
                 .show(ui, |ui| {
                     ui.vertical(|ui| {
