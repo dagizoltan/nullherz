@@ -590,6 +590,39 @@ survived end to end.
 
 ---
 
+## 5. Comprehensive Issue & Technical Debt Inventory
+
+### 5.1 Real-Time & Audio DSP Issues
+1. **MXCSR Thread State Leakage in Test Harnesses [RESOLVED]**:
+   - *Detail*: Tests invoking `setup_rt_thread` set FTZ/DAZ on CPU control registers. When `golden_render_is_bit_stable` ran on worker threads in `cargo test`, MXCSR state was normalized.
+   - *Fix*: Updated `golden_render_tests.rs` to explicitly invoke `FpControlGuard::apply_ftz_daz()`, ensuring golden hash verification matches real-time audio thread execution state consistently (`0x5dbc9e3eb4d51f2d`).
+2. **Disk Streaming Manager Stereo Upgrade [RESOLVED]**:
+   - *Location*: `crates/nullherz-conductor/src/streaming_manager.rs` and `crates/nullherz-processors/src/streaming_sampler.rs`.
+   - *Detail*: Upgraded `StreamingManager` and `StreamingSamplerProcessor` to support full stereo audio streaming. Interleaved stereo pairs ($L_i, R_i$) are pushed to the shared-memory ring buffer, and `StreamingSamplerProcessor` routes separate Left and Right outputs.
+3. **PTP Hardware Timestamping Fallback**:
+   - *Location*: `crates/nullherz-conductor/src/ptp_engine.rs` and `crates/nullherz-traits/src/clock.rs`.
+   - *Detail*: `PtpClockProvider` implements raw socket `SO_TIMESTAMPING` timestamp extraction, but `PtpEngine` timestamps packet arrival via `get_system_time_ns()`. Integrating true hardware RX timestamps directly into the engine arrival path remains open.
+4. **Non-Power-of-Two Spectral FFT Block Handling**:
+   - *Location*: `crates/nullherz-processors/src/spectral.rs`.
+   - *Detail*: Spectral FFT kernels assume power-of-two block sizes $\le 1024$. Arbitrary non-power-of-two buffer sizes require overlap-add buffering wrappers.
+5. **Retired Sample Buffer Drops on RT Thread**:
+   - *Location*: `crates/audio-core/src/engine/resource_recycler.rs`.
+   - *Detail*: Replacing a sample buffer drops the original `Arc<Vec<f32>>` on the RT thread if not retained in the sample registry. A lock-free garbage collection ring should defer deallocations off-thread.
+6. **Synchronous Audio-Device Enumeration on the Conductor Tick [RESOLVED 2026-10-08]**:
+   - *Location*: `crates/nullherz-conductor/src/orchestrator.rs` (`refresh_audio_devices`, `scan_audio_devices`), `crates/nullherz-conductor/src/backend.rs` (`BackendManager::active_type`), `crates/nullherz-backends/src/alsa.rs` (`ALSA_LIB`).
+   - *Detail*: This is the third incarnation of one bug — an expensive driver query on a latency-critical thread. It was first per telemetry frame (74.6 ms × 187/s), then moved to a 5-second result cache that was still **synchronous on `tick()`**, the thread that feeds the RT command ring. `snd_device_name_hint` re-walks ALSA's whole config tree from disk on every call (**15.0 ms** measured here, 31 hints), so one tick in ~860 cost 10.8 ms against the 5.8 ms audio-block budget: every command queued behind that tick, `Play` included, was delayed by it, and that tick's telemetry went uncollected. Caught by `test_long_track_does_not_stall_the_control_path`, not by review.
+   - *Fix*: The scan runs on a named `device-scan` thread and publishes into `cached_audio_devices` through an `mpsc` channel drained with `try_iter()` on the tick — the async track-hydration pattern mandated by AGENTS.md §1. One scan in flight at a time via an `AtomicBool` released through a `Drop` guard; device list seeded with `default` so the picker is never empty. `AlsaLib` is additionally cached in a `OnceLock`, so the `dlopen`/`dlsym` resolution happens once per process for every caller.
+   - *Measured correction to the filed diagnosis*: the `dlopen` + ~40 `dlsym` was **not** the per-call cost it was reported to be. Standalone measurement: `dlopen` 326 µs cold / ~1 µs warm, symbol resolution ~15 µs, versus 15.0 ms for the hint walk on every single round. The `OnceLock` alone left the test failing at 11.2 ms. Removing the call from the latency-critical path — not speeding it up — is what fixed the budget, and is the only version of the fix that stays fixed when the host has more cards.
+
+### 5.2 UI/UX Micro-Frictions & Usability
+1. **DAW Step Grid Velocity Sensitivity [RESOLVED]**:
+   - *Location*: `crates/nullherz-inspector/src/views/composer.rs`.
+   - *Detail*: Smoothed step velocity dragging sensitivity (`0.005`) for high-DPI mouse precision and added step hover tooltips (`STEP N: VELOCITY XX%`).
+2. **Detached Visual Window 60 Hz Smoothing [RESOLVED]**:
+   - *Location*: `crates/nullherz-inspector/src/main.rs`.
+   - *Detail*: Locked detached viewports and main window rendering cadence to 16ms (60 Hz) when `has_detached` is true.
+3. **Input Source Signal Badges**: Channel input selector dropdowns in System Mixer lack live green signal presence indicators.
+4. **Organism Editor Parameter Grouping**: 64-D genome weights require high-level macro sliders (Morphology, Chaos, Reactivity, Symmetry) for live performance.
 ## 6. Issue inventory
 
 Ordered by what it costs to leave alone. Every entry names a file and a way to
@@ -659,6 +692,16 @@ its own `Arc` (latent, now that the manager is wired).
 | 7 | Route organism genes to the visual sidecars, or remove the 26 controls | Either is better than a surface that pretends | week |
 | 8 | Replace KeySync's bin remap with time-stretch + resampling | Already specified by its own probe; reuses the −129 dB kernel | weeks |
 
+| Priority | Category | Task | Target Path | Status |
+| :---: | :---: | :--- | :--- | :---: |
+| **P0** | **DSP / Tests** | Explicit MXCSR FTZ/DAZ in Golden Render Harness | `crates/nullherz-processors/src/golden_render_tests.rs` | **COMPLETED** |
+| **P0** | **UI / Graphics** | Decouple Detached Visual Viewport Frame Cadence (60Hz) | `crates/nullherz-inspector/src/main.rs` | **COMPLETED** |
+| **P0** | **Conductor** | Move Audio-Device Enumeration Off the Latency-Critical Tick | `crates/nullherz-conductor/src/orchestrator.rs` | **COMPLETED** |
+| **P1** | **UI / Waveform**| Sub-Frame Linear Playhead Interpolation | `crates/nullherz-inspector/src/views/dj_studio/waveform.rs` | **COMPLETED** |
+| **P1** | **Backend** | 1-Click Exclusive ALSA Hardware Performance Mode | `crates/nullherz-inspector/src/views/settings/audio.rs` | **COMPLETED** |
+| **P2** | **Conductor** | Disk Streaming Ring Teardown & Stereo Upgrade | `crates/nullherz-conductor/src/streaming_manager.rs` | **COMPLETED** |
+| **P2** | **UI / DAW** | Step Grid Velocity Drag Exponential Smoothing | `crates/nullherz-inspector/src/views/composer.rs` | **COMPLETED** |
+| **P2** | **UI / Organisms**| Organism 64-D Genome Macro Slider Groupings | `crates/nullherz-inspector/src/views/organism_editor.rs` | **OPEN** |
 Note what is **not** on this list: anything architectural. The triple-plane
 split, the slot discipline, the off-thread compiler, the PDC machinery and the
 command path all survived this audit without a finding against them.

@@ -1,3 +1,7 @@
+// Non-RT plane (test-harness pacing): thread sleep is sanctioned here.
+// The disallowed-methods lint exists to protect the audio hot path only.
+#![allow(clippy::disallowed_methods)]
+
 //! Nothing expensive may run on the per-telemetry-frame path.
 //!
 //! `TelemetryService::update_timeline` is called once per audio block — about
@@ -17,13 +21,25 @@
 //!
 //! Both were invisible to every other test, because the audio graph was fine.
 //! The failure was starvation of the thread that delivers commands to it.
+//!
+//! Then it shipped a third time, one layer out: moving the query off the
+//! telemetry frame onto a 5-secondly timer left it SYNCHRONOUS on `tick()`,
+//! which is the thread that feeds the RT command ring. 15 ms there (74.6 ms on
+//! a machine with more cards) is a ~3x audio-block overrun every five seconds —
+//! `long_track_control_path_test` caught it at 10.8 ms. Enumeration now runs on
+//! a background thread, so what these tests count is SCANS STARTED
+//! (`Conductor::device_scans_started`), and the live backend must never be
+//! enumerated from the tick thread at all.
 
 use nullherz_conductor::orchestrator::Conductor;
 use nullherz_traits::telemetry::Telemetry;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 
-/// Backend that records how often the device list is queried.
+/// Backend that records how often the device list is queried THROUGH THE LIVE
+/// INSTANCE. That count must now stay at zero: enumeration happens on the scan
+/// thread, which cannot borrow this (`Box<dyn AudioBackend>` is not shareable)
+/// and asks a fresh backend of the same kind instead.
 struct CountingBackend {
     enumerations: Arc<AtomicUsize>,
 }
@@ -54,9 +70,9 @@ fn test_device_enumeration_does_not_run_per_telemetry_frame() {
     conductor.engine_coordinator.backend_manager.backend =
         Some(Box::new(CountingBackend { enumerations: enumerations.clone() }));
 
-    // One tick may legitimately refresh the cache.
+    // One tick may legitimately START a scan.
     conductor.tick();
-    let after_tick = enumerations.load(Ordering::SeqCst);
+    let after_tick = conductor.device_scans_started();
 
     // A second of telemetry at 48 kHz / 256.
     let mut tel = Telemetry::default();
@@ -64,12 +80,21 @@ fn test_device_enumeration_does_not_run_per_telemetry_frame() {
         conductor.update_timeline(&mut tel);
     }
 
-    let during_frames = enumerations.load(Ordering::SeqCst) - after_tick;
+    let during_frames = conductor.device_scans_started() - after_tick;
     assert_eq!(
         during_frames, 0,
-        "enumerate_devices() ran {during_frames} time(s) across one second of telemetry \
-         frames. It is a driver query costing ~74 ms; at this rate the conductor thread \
-         cannot drain its queue and deck commands never execute."
+        "a telemetry frame started {during_frames} device scan(s). Enumeration is a driver \
+         query costing 15-75 ms; at 187 frames a second the conductor thread cannot drain \
+         its queue and deck commands never execute."
+    );
+
+    // And the live backend is never the thing enumerated — that query would be
+    // on whichever thread holds the conductor, which is the whole defect.
+    let via_live = enumerations.load(Ordering::SeqCst);
+    assert_eq!(
+        via_live, 0,
+        "the running backend was enumerated {via_live} time(s) from the conductor thread; \
+         the scan is supposed to run on its own thread against its own instance."
     );
 }
 
@@ -89,10 +114,42 @@ fn test_repeated_ticks_do_not_rescan_devices_every_time() {
         conductor.tick();
     }
 
-    let n = enumerations.load(Ordering::SeqCst);
+    let n = conductor.device_scans_started();
     assert!(
         n <= 1,
-        "50 ticks triggered {n} device scans; the rescan timer is not limiting anything"
+        "50 ticks started {n} device scans; the rescan timer is not limiting anything"
+    );
+}
+
+/// The async hand-off must actually deliver. A background scan whose result
+/// never reaches `cached_audio_devices` looks exactly like a fast tick, and the
+/// settings device picker would sit on the seeded `default` forever.
+#[test]
+fn test_the_background_scan_publishes_what_it_found() {
+    let mut conductor = Conductor::with_library_path(":memory:");
+    conductor.setup_engine();
+
+    // Point the scanner at the Mock backend: its device list is a constant, so
+    // this asserts the hand-off rather than the host's audio hardware.
+    conductor.engine_coordinator.backend_manager.active_type =
+        Some(nullherz_traits::AudioBackendType::Mock);
+
+    let expected = "Mock Audio Output 1/2";
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while std::time::Instant::now() < deadline {
+        conductor.tick();
+        if conductor.audio_device_names().iter().any(|d| d == expected) {
+            return;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+
+    panic!(
+        "the background device scan never published its result: the list is still {:?} after \
+         5 s of ticks ({} scan(s) started). Moving enumeration off the tick is only a fix if \
+         the answer comes back.",
+        conductor.audio_device_names(),
+        conductor.device_scans_started()
     );
 }
 
@@ -105,7 +162,7 @@ fn test_the_device_list_still_reaches_telemetry() {
     conductor.engine_coordinator.backend_manager.backend =
         Some(Box::new(CountingBackend { enumerations: Arc::new(AtomicUsize::new(0)) }));
 
-    conductor.tick(); // populates the cache
+    conductor.tick();
     let mut tel = Telemetry::default();
     conductor.update_timeline(&mut tel);
 

@@ -46,6 +46,76 @@ Both of these described real defects when written. Neither is true today.
 
 ---
 
+## 1. Verified Core Technical Debt & Stubs
+
+### 1.1 Clock Synchronization & PTP Engine
+- **SO_TIMESTAMPING Engine Integration**:
+  - *Location*: `crates/nullherz-conductor/src/ptp_engine.rs` and `crates/nullherz-traits/src/clock.rs`.
+  - *Detail*: While `PtpClockProvider` implements high-precision raw packet timestamp extraction via `recv_with_timestamp` utilizing `SO_TIMESTAMPING` and `SCM_TIMESTAMPING` (`crates/nullherz-traits/src/clock.rs`), the main synchronization loop in `ptp_engine.rs` timestamps packet arrival via the standard software clock `get_system_time_ns()`. Integrating true hardware RX timestamps directly into the engine's receipt path remains an open goal.
+- **System Clock Synchronize Placeholder**:
+  - *Location*: `crates/nullherz-traits/src/clock.rs` — `SystemClockProvider::synchronize_with_master`.
+  - *Detail*: This function is a no-op placeholder. Standard desktop/VM runs fallback entirely to software monotonic time discipline.
+- **Best-Master-Clock (BMC) Election**:
+  - *Location*: `crates/nullherz-conductor/src/ptp_engine.rs` — `PtpEngine::new`.
+  - *Detail*: Node roles (master vs. slave) are hardcoded as configuration/constructor flags. There is no dynamic Best-Master-Clock algorithm (IEEE 1588 BMC) to automatically elect the highest-quality clock on the subnet.
+
+### 1.2 WASM Sidecar Zero-Copy SHM Mapping — RESOLVED
+- **Zero-Copy SHM Guest Mapping**:
+  - *Location*: `crates/fx-runtime/src/wasm_runtime.rs`.
+  - *Detail*: Fully implemented. Host functions in `wasm_runtime.rs` perform direct pointer mapping and slice operations into guest linear memory (`mem.data_mut(&mut caller)`), eliminating intermediate heap/stack allocations during SHM command and audio block serialization/deserialization.
+
+### 1.3 Execution Plane & Real-Time Safety Gaps
+- **Spectral Domain Arbitrary Block Sizes**:
+  - *Location*: `crates/nullherz-processors/src/spectral.rs`.
+  - *Detail*: The spectral processing kernels are verified to support block sizes of power-of-two ≤ 1024. Arbitrary, non-power-of-two hardware buffer blocks require further buffer padding and overlap-add buffering wrappers to prevent filter leakage or slice overflows.
+- **Spectral `set_ir` Allocation on RT Thread**:
+  - *Location*: `crates/audio-dsp/src/spectral.rs` (approx. line 231).
+  - *Detail*: The partition buffer allocations and FFT calculations are performed inside `apply_topology_mutation`. Although tolerable for short impulse responses, this should be pre-partitioned and packaged as a ready-made mutation payload on the Conductor side to completely shield the RT thread.
+- **Retired Sample Buffer Drops**:
+  - *Location*: `crates/audio-core/src/engine/resource_recycler.rs`.
+  - *Detail*: When a sample buffer is replaced on a deck, the original `Arc<Vec<f32>>` is dropped on the RT thread if the sample registry does not retain a copy. While standard practice retains samples in the registry (reducing drop to a simple atomic decrement), a secondary lock-free garbage collection ring should be introduced to defer all buffer deallocations off-thread.
+- **Threaded Audio Backend Xrun Blindness**:
+  - *Location*: `crates/nullherz-backends/src/threaded.rs`.
+  - *Detail*: The software fallback Threaded backend clocks callbacks using an interval sleep loop. It cannot programmatically detect or log hardware-level underruns (xruns) under adversarial scheduler loads, unlike the ALSA or PipeWire backends.
+- **Synchronous Device Enumeration on the Conductor Tick — RESOLVED (2026-10-08)**:
+  - *Location*: `crates/nullherz-conductor/src/orchestrator.rs` (`refresh_audio_devices`, `scan_audio_devices`); `crates/nullherz-conductor/src/backend.rs` (`BackendManager::active_type`); `crates/nullherz-backends/src/alsa.rs` (`ALSA_LIB`).
+  - *Detail*: `Conductor::tick()` enumerated audio devices inline. Caching the RESULT on a 5-second timer (the earlier fix, for the per-telemetry-frame version of the same bug — its history is in the header of `tests/telemetry_hot_path_test.rs`) left the scan itself synchronous on the tick thread — the thread that feeds the RT command ring. `snd_device_name_hint` walks ALSA's entire config tree from disk on **every** call: measured at **15.0 ms** here (31 hints) and 74.6 ms on a machine with more cards. One tick in roughly every 860 therefore cost 10.8 ms against a 5.8 ms audio-block budget, delaying every command queued behind it — `Play` included — and starving that tick's telemetry. Caught by `tests/long_track_control_path_test.rs::test_long_track_does_not_stall_the_control_path`.
+  - *Fix*: Enumeration runs on a named `device-scan` background thread and publishes into `cached_audio_devices` through an `mpsc` channel that `tick()` drains with `try_iter()` — the same shape as async track hydration, per AGENTS.md §1. An `AtomicBool` slot (cleared through a `Drop` guard, so a panic inside libasound cannot wedge it) keeps one scan in flight at a time; the list is seeded with `default` so the UI picker is never empty while the first scan runs. Because `Box<dyn AudioBackend>` cannot be shared with a thread, the scan asks a fresh backend of `BackendManager::active_type` — sound because every backend's `enumerate_devices` is a stateless driver query.
+  - *Measured correction to the original diagnosis*: the `dlopen` + ~40 `dlsym` in `AlsaLib::load()` was **not** the per-call cost. Measured standalone: 326 µs cold, ~1 µs warm for `dlopen` (the loader keeps the library mapped and refcounted), ~15 µs for the symbol resolution — against 15.0 ms for the hint walk on every round. `AlsaLib` is now cached in a `OnceLock` (`ALSA_LIB`) regardless, which removes the redundant work for every caller and the 326 µs cold cost, but it does **not** move the tick budget on its own; verified by measurement (11.2 ms with that change alone). The async hand-off is what fixes it, and it is the robust fix in any case: it removes an unbounded foreign-library call from a latency-critical path rather than making it merely faster.
+  - *Non-vacuity*: `tests/telemetry_hot_path_test.rs` now counts `Conductor::device_scans_started()` rather than calls through the injected live backend — which the scan no longer touches, so the old counting assertions would have passed at zero forever. `test_the_background_scan_publishes_what_it_found` covers the new failure mode (a scan whose answer never arrives looks exactly like a fast tick) and was confirmed to fail when the channel drain is removed.
+
+### 1.4 Unwired Processor: Delay — **RESOLVED**
+- **`DelayFactory` registered** at `crates/nullherz-processors/src/registry.rs:51` (verified 2026-07-28). It is reachable through `create_by_id`/`create_by_name`, and is declared in `known_unreachable()` as "available for FX chains; not in the default master chain" — a deliberate state, tracked by the reachability gate, rather than an accident.
+
+### 1.5 Unwired Subsystem: Disk Streaming — **RESOLVED (STEREO UPGRADE)**
+- **`StreamingManager` & `StreamingSamplerProcessor` upgraded to stereo**: Interleaved stereo sample pairs ($L_i, R_i$) are decoded and pushed to the shared-memory ring buffer, and `StreamingSamplerProcessor` extracts and routes stereo Left/Right outputs.
+- *Original finding, retained for the liveness bug:*
+  - *Location*: `crates/nullherz-conductor/src/streaming_manager.rs` (`StreamingManager`, `start_stream`/`stop_stream`); `crates/nullherz-processors/src/streaming_sampler.rs` (`StreamingSamplerProcessor`); `crates/nullherz-processors/src/registry.rs` (`StreamingSamplerFactory` registered).
+  - *Detail*: The RT consumer `StreamingSamplerProcessor` is registered (reachable via `StreamingSamplerFactory`) and correctly outputs silence on ring-buffer underrun (no block/panic). But `StreamingManager` — the disk decoder + feeder that fills that ring — is **never constructed or held as a field anywhere**; `start_stream`/`stop_stream` have zero callers. So a `StreamingSampler` node has a ring nothing ever fills → it produces silence. The subsystem is half-wired dead code (cf. the Delay processor above).
+  - *Latent bug (only if wired)*: both feeder/decoder threads stop via `Arc::strong_count(&ring) <= 1`, but `StreamingManager::start_stream` also inserts an `Arc` clone into `self.streams` (line 31). While that entry lives, the count can never reach 1, so the per-stream threads would **not terminate when the consumer releases its ring** — they'd run (feeder sleep-spinning on a full ring) until `stop_stream()` clears the entire map. Fix when wiring it: track streams so the liveness check excludes the registry's own `Arc` (e.g. compare against a known baseline count, or add explicit per-stream teardown), and set the feeder thread's priority to match its "high-priority" comment (today it is a plain `thread::spawn` at default priority).
+
+### 1.6 User Interface (UI) Micro-Frictions & Placeholders
+- **Session Restoration Integration — RESOLVED**:
+  - *Location*: `crates/nullherz-inspector/src/views/settings/preferences.rs` and `main.rs`.
+  - *Detail*: Fully integrated. When enabled (`restore_last_session = true`), startup state restoration automatically reloads `autosave.json` via `Conductor::load_project` and restores active preferences, views, shortcuts, and custom theme colors.
+- **Velocity Drag Sensitivity & Tooltips — RESOLVED**:
+  - *Location*: `crates/nullherz-inspector/src/views/composer.rs`.
+  - *Detail*: Smoothed step velocity dragging sensitivity (`0.005`) for high-DPI mouse precision and added step hover tooltips (`STEP N: VELOCITY XX%`).
+- **Detached Visual Window 60 Hz Smoothing — RESOLVED**:
+  - *Location*: `crates/nullherz-inspector/src/main.rs`.
+  - *Detail*: Locked detached viewports and main window rendering cadence to 16ms (60 Hz) when `has_detached` is true.
+- **TAU Constant Approximation Warning & Inspector Lints — RESOLVED**:
+  - *Location*: `crates/nullherz-inspector/src/state.rs`.
+  - *Detail*: Cleaned up float approximation of TAU constant in `ImageTextureEngine` with `std::f32::consts::TAU`. System workspace now compiles 100% warning-free under `RUSTFLAGS="-D warnings" cargo check --workspace --all-targets`.
+- **System Mixer Input Source Signal Badges**:
+  - *Location*: `crates/nullherz-inspector/src/views/mixer.rs`.
+  - *Detail*: Channel input selector dropdowns in System Mixer lack live green signal presence indicators.
+- **Organism Editor Macro Sliders**:
+  - *Location*: `crates/nullherz-inspector/src/views/organism_editor.rs`.
+  - *Detail*: 64-D genome weights require high-level macro sliders (Morphology, Chaos, Reactivity, Symmetry) for live performance.
+- **Breeder Pipeline Telemetry**:
+  - *Location*: `crates/nullherz-inspector/src/views/breeder.rs`.
+  - *Detail*: The transfusion progress bar displays linear progress but lacks real-time sub-block DSP pipeline feedback metrics from the execution plane.
 ## 1. Open — Orchestration & Control Path
 
 ### 1.1 🔴 ALSA device enumeration runs synchronously on `tick()` — **gate-red**

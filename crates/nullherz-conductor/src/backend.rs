@@ -8,6 +8,13 @@ use nullherz_backends::AudioBackend;
 
 pub struct BackendManager {
     pub backend: Option<Box<dyn AudioBackend>>,
+    /// Which kind of backend `backend` is, when one is running.
+    ///
+    /// `Box<dyn AudioBackend>` cannot be shared with another thread, so the
+    /// conductor's background device scan cannot ask the running instance what
+    /// devices exist. It asks a fresh backend of this kind instead — see
+    /// `scan_audio_devices`. Kept in step with `backend` by `start`/`stop`.
+    pub active_type: Option<AudioBackendType>,
     pub engine_handle: Arc<Mutex<Option<Arc<dyn RenderingEngine>>>>,
 }
 
@@ -15,6 +22,7 @@ impl Default for BackendManager {
     fn default() -> Self {
         Self {
             backend: None,
+            active_type: None,
             engine_handle: Arc::new(Mutex::new(None)),
         }
     }
@@ -56,10 +64,12 @@ impl BackendManager {
 
         backend.start(self.engine_handle.clone(), period_size)?;
         self.backend = Some(backend);
+        self.active_type = Some(backend_type);
         Ok(())
     }
 
     pub fn stop(&mut self) {
+        self.active_type = None;
         if let Some(mut backend) = self.backend.take() {
             backend.stop();
         }

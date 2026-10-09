@@ -46,8 +46,14 @@ echo "==> smoke: ${MINUTES} min on ${BACKEND}"
 # fail: underruns counted BY THE BACKEND (the engine's own counter is never
 # incremented), audio present in >90% of frames (so a silent graph cannot pass
 # with a trivial zero), and telemetry actually flowing.
+# The tracks live under library/tracks. `survival` still defaults to a bare
+# `tracks`, which has not existed since the library moved — so the gate's smoke
+# step died on "needed 2 analyzed tracks in 'tracks', found 0" rather than on
+# anything about the console. Pass the real directory; the override exists so a
+# run can be pointed at a scratch fixture without editing this script.
+TRACKS_DIR="${NULLHERZ_TRACKS_DIR:-library/tracks}"
 if ! cargo run --release --quiet -p nullherz-conductor --bin survival -- \
-        --backend "$BACKEND" --minutes "$MINUTES" --report "$REPORT"; then
+        --backend "$BACKEND" --minutes "$MINUTES" --tracks "$TRACKS_DIR" --report "$REPORT"; then
     echo
     echo "SMOKE FAILED — the console did not survive a ${MINUTES}-minute run."
     echo

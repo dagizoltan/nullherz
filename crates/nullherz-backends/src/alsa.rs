@@ -9,7 +9,11 @@ use nullherz_traits::RenderingEngine;
 use crate::AudioBackend;
 
 struct AlsaLib {
-    handle: *mut std::ffi::c_void,
+    /// The `dlopen` handle, kept for provenance and deliberately never passed
+    /// to `dlclose` — see the note where the old `Drop` impl was. Storing it is
+    /// not what keeps the library mapped (never unloading it is), which is why
+    /// nothing reads it.
+    _handle: *mut std::ffi::c_void,
     snd_pcm_open: unsafe extern "C" fn(*mut *mut std::ffi::c_void, *const std::os::raw::c_char, std::os::raw::c_int, std::os::raw::c_int) -> std::os::raw::c_int,
     snd_pcm_hw_params_malloc: unsafe extern "C" fn(*mut *mut std::ffi::c_void) -> std::os::raw::c_int,
     snd_pcm_hw_params_any: unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void) -> std::os::raw::c_int,
@@ -56,9 +60,47 @@ struct AlsaSwParams {
 }
 
 unsafe impl Send for AlsaLib {}
+// SAFETY: every field is set once by `resolve` and never written again — an
+// inert `dlopen` handle plus function pointers into a library that is never
+// unloaded. Calling libasound through a shared reference is what the audio
+// thread and the enumeration path were already doing with two separate
+// handles; sharing one changes the handle count, not the concurrency.
+// Required so `&'static AlsaLib` is `Send` (it is moved into the audio
+// thread) and so `ALSA_LIB` can be a static.
+unsafe impl Sync for AlsaLib {}
+
+/// The process-wide `libasound` handle, resolved at most once.
+///
+/// Nothing in [`AlsaLib::resolve`] is per-call work — the handle and the symbol
+/// addresses are valid for the life of the process — so it is resolved once and
+/// handed out as `&'static`. Every caller benefits: `start`,
+/// `enumerate_devices` and `probe_hardware_capabilities` each used to re-resolve
+/// the whole table.
+///
+/// Measured here, to keep the next reader from mis-attributing the cost: the
+/// `dlopen` is 326 µs on the first call and ~1 µs after (the loader keeps the
+/// library mapped and refcounted, so a repeat `dlopen` resolves nothing), and
+/// the ~40 `dlsym` cost ~15 µs. So this cache buys the cold 326 µs and some
+/// noise — it is NOT what made `enumerate_devices` expensive. That is
+/// `snd_device_name_hint` re-walking ALSA's config tree from disk at 15.0 ms
+/// EVERY call, which no cache here can fix; the conductor answers it by
+/// enumerating on a background thread instead.
+///
+/// A failure is cached too. If `libasound.so.2` is not present at first use it
+/// will not appear later in the same run, and retrying meant re-walking the
+/// loader search path on every call from a machine that has no ALSA at all.
+static ALSA_LIB: std::sync::OnceLock<Result<AlsaLib, String>> = std::sync::OnceLock::new();
 
 impl AlsaLib {
-    fn load() -> Result<Self, String> {
+    /// The shared handle. See [`ALSA_LIB`] for why this is not per-call.
+    fn load() -> Result<&'static Self, String> {
+        ALSA_LIB
+            .get_or_init(Self::resolve)
+            .as_ref()
+            .map_err(|e| e.clone())
+    }
+
+    fn resolve() -> Result<Self, String> {
         unsafe {
             let lib = libc::dlopen(c"libasound.so.2".as_ptr(), libc::RTLD_NOW | libc::RTLD_GLOBAL);
             if lib.is_null() { return Err("Could not load libasound.so.2".to_string()); }
@@ -67,7 +109,7 @@ impl AlsaLib {
                 if sym.is_null() { None } else { Some(sym) }
             };
             Ok(Self {
-                handle: lib,
+                _handle: lib,
                 snd_pcm_open: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut *mut std::ffi::c_void, *const i8, i32, i32) -> i32>(load_sym(c"snd_pcm_open").ok_or("sym failed")?),
                 snd_pcm_hw_params_malloc: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut *mut std::ffi::c_void) -> i32>(load_sym(c"snd_pcm_hw_params_malloc").ok_or("sym failed")?),
                 snd_pcm_hw_params_any: std::mem::transmute::<*mut libc::c_void, unsafe extern "C" fn(*mut std::ffi::c_void, *mut std::ffi::c_void) -> i32>(load_sym(c"snd_pcm_hw_params_any").ok_or("sym failed")?),
@@ -116,7 +158,12 @@ impl AlsaLib {
         }
     }
 }
-impl Drop for AlsaLib { fn drop(&mut self) { unsafe { libc::dlclose(self.handle); } } }
+// No `Drop`: the one `AlsaLib` lives in `ALSA_LIB` for the life of the process
+// and statics are never dropped, so a `dlclose` here would be unreachable —
+// and wrong if it ever did run, because every `&'static AlsaLib` handed out
+// (the audio thread holds one) points into the library it would unload. The
+// per-call handle this replaced was balanced dlopen/dlclose; one permanent
+// handle is the same refcount, held open deliberately.
 
 
 /// The sample format negotiated with the device.
@@ -429,7 +476,7 @@ impl AlsaBackend {
 
     /// Spawn real-time audio thread executing lock-free rendering loop.
     fn spawn_audio_thread(
-        alsa: AlsaLib,
+        alsa: &'static AlsaLib,
         pcm: *mut std::ffi::c_void,
         cfg: AlsaHwConfig,
         running: Arc<std::sync::atomic::AtomicBool>,
@@ -504,7 +551,7 @@ impl AlsaBackend {
                 let silence_s32 = vec![0i32; actual_period * 2];
                 let silence_s16 = vec![0i16; actual_period * 2];
                 let n_periods = (cfg.negotiated_buffer / cfg.period_size).max(2);
-                prefill(&alsa, pcm, &silence_f32, &silence_s32, &silence_s16, n_periods);
+                prefill(alsa, pcm, &silence_f32, &silence_s32, &silence_s16, n_periods);
 
                 while running.load(Ordering::SeqCst) {
                     for (offset, chunk_size) in crate::chunking::render_blocks(actual_period, ipc_layer::MAX_BLOCK_SIZE) {
@@ -528,7 +575,7 @@ impl AlsaBackend {
                                 interleaved_f32[i*2] = outputs_raw[0][i];
                                 interleaved_f32[i*2+1] = outputs_raw[1][i];
                             }
-                            write_pcm(&alsa, pcm, interleaved_f32.as_ptr() as *const _, actual_period as u64)
+                            write_pcm(alsa, pcm, interleaved_f32.as_ptr() as *const _, actual_period as u64)
                         }
                         OutFormat::S32 => {
                             for i in 0..actual_period {
@@ -537,7 +584,7 @@ impl AlsaBackend {
                                 interleaved_s32[i*2] = l.clamp(-2_147_483_648.0, 2_147_483_647.0) as i32;
                                 interleaved_s32[i*2+1] = r.clamp(-2_147_483_648.0, 2_147_483_647.0) as i32;
                             }
-                            write_pcm(&alsa, pcm, interleaved_s32.as_ptr() as *const _, actual_period as u64)
+                            write_pcm(alsa, pcm, interleaved_s32.as_ptr() as *const _, actual_period as u64)
                         }
                         OutFormat::S16 => {
                             for i in 0..actual_period {
@@ -546,7 +593,7 @@ impl AlsaBackend {
                                 interleaved_s16[i*2] = l.clamp(-32768.0, 32767.0) as i16;
                                 interleaved_s16[i*2+1] = r.clamp(-32768.0, 32767.0) as i16;
                             }
-                            write_pcm(&alsa, pcm, interleaved_s16.as_ptr() as *const _, actual_period as u64)
+                            write_pcm(alsa, pcm, interleaved_s16.as_ptr() as *const _, actual_period as u64)
                         }
                     };
 
@@ -554,7 +601,7 @@ impl AlsaBackend {
                         xruns.fetch_add(1, Ordering::Relaxed);
                         (alsa.snd_pcm_recover)(pcm, written as i32, 1);
                         (alsa.snd_pcm_prepare)(pcm);
-                        prefill(&alsa, pcm, &silence_f32, &silence_s32, &silence_s16, n_periods);
+                        prefill(alsa, pcm, &silence_f32, &silence_s32, &silence_s16, n_periods);
                     }
                 }
                 (alsa.snd_pcm_close)(pcm);
@@ -595,8 +642,8 @@ impl AudioBackend for AlsaBackend {
         }
         eprintln!("[ALSA] snd_pcm_open SUCCESS on '{}'", self.device);
 
-        let cfg = unsafe { Self::configure_hw_params(&alsa, pcm, &engine_handle, requested_period_size)? };
-        unsafe { Self::configure_sw_params(&alsa, pcm, &cfg); }
+        let cfg = unsafe { Self::configure_hw_params(alsa, pcm, &engine_handle, requested_period_size)? };
+        unsafe { Self::configure_sw_params(alsa, pcm, &cfg); }
         self.buffer_frames.store(cfg.negotiated_buffer as u32, Ordering::Relaxed);
 
         eprintln!("[ALSA] PCM configured. Handing to audio thread...");
