@@ -2,15 +2,36 @@
 
 Technical, strategic, and business knowledge base for the Nullherz engine.
 
-**Three documents carry the plan of record. Everything else is context.**
+> ## 🔴 Current state, 2026-10-08
+>
+> **The verification gate is RED.** `scripts/verify.sh` fails reproducibly (5/5)
+> on `test_long_track_does_not_stall_the_control_path`: ALSA device enumeration
+> costs 9–10 ms per call and runs synchronously on `Conductor::tick()`, against
+> a 5.805 ms budget. 552 tests pass in debug; 1 fails in release.
+> [Root cause and fix](./state/REVERSE_ENGINEERING_SYSTEM_REPORT_2026.md) · [debt §1.1](./state/TECHNICAL_DEBT_AND_STUBS.md)
+>
+> **Read this before planning sound-design work:** the engine and the resampler
+> measure reference-grade (**-129 dB THD+N, flat across frequency**); the
+> effects and the control surface do not. The deck FX rack is presentational —
+> one engine slot, unlimited UI slots, and remove/reorder/parameter controls that
+> emit no commands. [Audit §4–5](./state/REVERSE_ENGINEERING_SYSTEM_REPORT_2026.md) · [DSP quality table](./system/ARCHITECTURE.md)
 
-1. [System Architecture Reference](./system/ARCHITECTURE.md) — what the system *is*.
-2. [Pre-Implementation Design Gate](./system/PRE_IMPLEMENTATION_DESIGN_GATE_2026_07.md) — the measurements and the defect inventory.
-3. [Implementation Roadmap, July 2026](./roadmap/IMPLEMENTATION_ROADMAP_2026_07.md) — what happens next, in order, each phase ending in a number or a green test.
+**Four documents carry the plan of record. Everything else is context.**
+
+1. [System Architecture Reference](./system/ARCHITECTURE.md) — what the system *is*. Re-measured 2026-10-08; §1.1.1 is the DSP quality table.
+2. [Reverse-Engineering Master Report](./state/REVERSE_ENGINEERING_SYSTEM_REPORT_2026.md) — **the current audit**: every number carries the command that reproduces it, and every figure that did not reproduce is named in both directions.
+3. [Pre-Implementation Design Gate](./system/PRE_IMPLEMENTATION_DESIGN_GATE_2026_07.md) — the July measurements and defect inventory.
+4. [Implementation Roadmap, July 2026](./roadmap/IMPLEMENTATION_ROADMAP_2026_07.md) — what happens next, in order, each phase ending in a number or a green test.
 
 Status claims live in the document that also carries the way to disprove them.
 Documents that asserted maturity without that are in [`archive/`](./archive/) —
 read [`archive/README.md`](./archive/README.md) before citing anything from there.
+
+**And re-verify before citing.** The 2026-10-08 pass found three classes of doc
+rot in files that were otherwise accurate: per-crate LOC drifted 2–4×, a
+superseded resampler figure was 36 dB *pessimistic*, and two debt entries
+described code that had since been fixed. A document nobody re-reads spends
+engineering attention on problems that no longer exist.
 
 ---
 
@@ -38,9 +59,9 @@ Core technical specifications and engineering principles.
 
 ## 📊 [Current State & Health](./state/)
 Tracking of system maturity and technical debt.
-- [System Architecture & Reverse Engineering Master Report (2026)](./state/REVERSE_ENGINEERING_SYSTEM_REPORT_2026.md) — **comprehensive audit**: triple-plane architecture, sound design audit, audio DSP benchmarks, and issue inventory
-- [Feature Matrix](./state/FEATURE_MATRIX.md) — a ✅ here means *reachable by a user*, not *a test passes*; the gate is `crates/nullherz-conductor/tests/reachability_gate_test.rs`
-- [Technical Debt & Stubs Log](./state/TECHNICAL_DEBT_AND_STUBS.md)
+- [System Architecture & Reverse Engineering Master Report (2026)](./state/REVERSE_ENGINEERING_SYSTEM_REPORT_2026.md) — **the current audit, 2026-10-08**: gate status, live DSP measurements with reproduction commands, sound-design audit, reachability audit, and a prioritised issue inventory
+- [Feature Matrix](./state/FEATURE_MATRIX.md) — a ✅ here means *reachable by a user*, not *a test passes* and not *good*; the gate is `crates/nullherz-conductor/tests/reachability_gate_test.rs`. ⚠️ rows are reachable with a measured limitation and cite the debt entry
+- [Technical Debt & Stubs Log](./state/TECHNICAL_DEBT_AND_STUBS.md) — the open register, re-verified 2026-10-08. Entries must be re-checked to stay; resolved items move out rather than acquiring a `RESOLVED` suffix
 - [Reverse Engineering Evaluation](./state/REVERSE_ENGINEERING_EVALUATION.md)
 - [Optimization & Hardening Log](./state/TECHNICAL_OPTIMIZATION_LOG.md)
 

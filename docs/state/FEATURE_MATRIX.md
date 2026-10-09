@@ -1,7 +1,21 @@
 # Nullherz System Feature Matrix (Stage 6: Evolutionary Intelligence)
 
 **Current State:** see [IMPLEMENTATION_ROADMAP_2026_07.md](../roadmap/IMPLEMENTATION_ROADMAP_2026_07.md) for current phase progress. A ✅ below means **a user can reach it in the application**, verified by `crates/nullherz-conductor/tests/reachability_gate_test.rs`.
-**Last Updated:** July 2026 — verified against code and hardware benchmark suites (see [ARCHITECTURE.md](../system/ARCHITECTURE.md) and [REVERSE_ENGINEERING_SYSTEM_REPORT_2026.md](./REVERSE_ENGINEERING_SYSTEM_REPORT_2026.md)).
+**Last Updated:** 2026-10-08 — re-verified against the tree (`main` @ `9d4be33`). See [ARCHITECTURE.md](../system/ARCHITECTURE.md) and [REVERSE_ENGINEERING_SYSTEM_REPORT_2026.md](./REVERSE_ENGINEERING_SYSTEM_REPORT_2026.md) for the commands behind every number here.
+
+> ⚠️ **Two caveats that apply to this whole matrix, both found on 2026-10-08.**
+>
+> 1. **The verification gate is RED.** `scripts/verify.sh` fails reproducibly
+>    (5/5) on `test_long_track_does_not_stall_the_control_path`: ALSA device
+>    enumeration costs 9–10 ms per call and runs synchronously on
+>    `Conductor::tick()`, against a 5.805 ms budget. Debt §1.1. A ✅ below means
+>    *reachable*; it does not mean the gate is green.
+> 2. **✅ means reachable, not fully controllable.** The deck FX rack is the
+>    exception that proves it: the bootstrap allocates **one** FX insert slot per
+>    deck, while the UI presents an unbounded, reorderable, removable rack whose
+>    remove, reorder and parameter controls emit **no commands at all**. A second
+>    hot-loaded FX silently replaces the first. Debt §3.1. Rows tagged
+>    **⚠️ one-slot** below inherit that limitation.
 
 ---
 
@@ -53,13 +67,14 @@
 | **Sample-Accurate Commands** | ✅ | Sub-block splitting at command timestamps with same-timestamp batch draining (`processing_kernel.rs`). |
 | **RT-Safe Sample Registry**| ✅ | Atomic-swap registry for lock-free sample/source access. |
 | **SIMD Kernel Foundation** | ✅ | AVX-512/NEON/WASM-SIMD128 optimized `FloatX16` and Padé activation approximants (`tanh`, GELU). |
-| **Signal Transparency** | ✅ | Bit-exact identity at unity; THD+N 0.00044% (-107.1 dB) against -134.7 dB analyser floor. |
-| **16-Tap Sinc Resampler** | ✅ | High-fidelity 16-tap windowed sinc resampler: THD+N 0.0023% (-92.8 dB @ 10kHz), -90.9 dB alias suppression. |
+| **Signal Transparency** | ✅ | Bit-exact identity at unity. **Re-measured 2026-10-08: THD+N 0.0000049% (-146.1 dB)** against a -153.2 dB analyser floor (FFT 16384). Response ripple ±0.056 dB, 40 Hz – 16 kHz, about a **-3.04 dB mean** — the constant-power crossfader law at centre (`1/√2`), by design and pinned by `test_curve_endpoints_are_linear_and_constant_power`. The earlier -107.1 dB figure was measured at a smaller FFT. |
+| **16-Tap Sinc Resampler** | ✅ | 16-tap Kaiser **β=14** windowed sinc with **cubic** table interpolation. **Re-measured 2026-10-08: -129.2 dB THD+N at 10 kHz, -129.4 dB at 997 Hz — flat across frequency** at realistic tempo ratios; 100 dB better than the Catmull-Rom it replaced (-29.0 dB at 10 kHz). The previously published "-92.8 dB" was the superseded β=9/linear-table configuration; the shipped kernel is **36 dB better than was claimed**. Costs 296 ns/sample, 45.5% of a 256-frame budget at 32 voices — **the voice-count ceiling**. |
+| **Pitch-Up Alias Suppression** | ⚠️ | The kernel scales its anti-alias cutoff by the stretch, but 16 taps give a finite transition width. 16 kHz source: **-17.7 dB fold at rate 1.6**, -63.0 dB at rate 2.0, gone (-136 dB) by 2.2. The published "-90.9 dB at rate 2.0" **does not reproduce**. Small on music (16 kHz energy sits ~40 dB below peak); real nonetheless. |
 | **64-bit f64 Playhead** | ✅ | 64-bit float playhead tracking in `SamplerVoice`, eliminating the 25.4-minute f32 playback freeze. |
 | **Exact Filter Math** | ✅ | Runtime Linkwitz-Riley coefficient generation for exact crossovers; bounded -0.115 dB isolator re-sum error. |
 | **Soft Fallback & Recovery** | ✅ | Heartbeat-monitored instant swap to bypass node upon DSP failure; escalation to global Safe Mode. |
 | **Spectral Processor** | ✅ | Hardened FFT overlap-add with exact COLA-normalized synthesis window (up to 1024 frames). |
-| **KeySync Pitch Shift** | ✅ | Phase-vocoder pitch shifter with per-bin phase tracking and zero-latency bypass slotting. |
+| **KeySync Pitch Shift** | ⚠️ | Phase-vocoder pitch shifter with per-bin phase tracking, installed on demand into the deck pitch slot (zero latency when disengaged). Sample-rate agnostic by construction — frequencies are carried in **bin units**, not Hz. **Quality is the open problem:** worst partial suppression **-17.8 dB** at the shipped N=1024/hop 128, with **7.65 dB spread between partials** on a chord. The error is *timbral*, so no makeup gain fixes it; the specified replacement is time-stretch + resampling. 21.33 ms latency. Debt §2.5. |
 | **Colored Waveforms** | ✅ | Per-window 3-band peaks + signed envelope (BandWaveform); filled per-vertex-colored GPU rendering. |
 | **DJ Transport Semantics** | ✅ | Stop pauses (position held), play resumes in place, load clears voices; playhead reports held position. |
 | **Planar Stereo Playback** | ✅ | Planar sample buffers end to end; frame-counted playhead; per-plane crop/stretch; deck strips stereo at every hop. |
@@ -151,18 +166,18 @@
 | `KeySync` | 17 | FX | Phase-vocoder pitch shifter with per-bin phase locking |
 | `PersonalityInheritance` | 18 | DNA | DNA trait inheritance and spectral resynthesis filter |
 | `DnaMorph` | 19 | DNA | Multidimensional DNA latent space interpolator |
-| `Limiter` | 20 | Dynamics | Lookahead peak limiter with brickwall ceiling protection |
+| `Limiter` | 20 | Dynamics | Look-ahead peak limiter, brickwall ceiling held exactly, transparent below threshold (-150 dB). **Sample-peak only — not ITU-R BS.1770 true peak** (no oversampling in the tree). 1.2% THD on 60 Hz under 6 dB of limiting: single-stage release. Debt §2.2, §2.4 |
 | `StreamingSampler` | 21 | Source | Double-buffered disk-to-SHM streaming sampler |
 | `Delay` | 22 | FX | Multi-tap delay line with fractional Hermite interpolation |
-| `NeuralSaturator` | 230 | Neural FX | Padé SIMD rational neural soft-clipping saturator |
-| `NeuralFilter` | 231 | Neural FX | State-variable hypernetwork dynamic filter |
+| `NeuralSaturator` | 230 | Neural FX ⚠️ | Padé SIMD rational soft-clipping saturator. Memoryless at base rate with **no oversampling** → harmonics above Nyquist fold back in band. Applies to `TapeSaturator`, `TubePreamp` and `NeuralNam` equally. Debt §2.2 |
+| `NeuralFilter` | 231 | Neural FX ⚠️ | State-variable hypernetwork dynamic filter. **Hardcodes `sample_rate = 48000.0` inside `process()`** — cutoff lands wrong at every other rate. One-line fix. Debt §2.3 |
 | `NeuralTcn` | 232 | Neural FX | 4-layer dilated Temporal Convolutional Network (TCN) |
 | `NeuralSsm` | 233 | Neural FX | 24-state Diagonal State-Space Model dynamic compressor |
 | `NeuralNam` | 234 | Neural FX | Wave-shaping network for tube preamp and amp modeling |
 | `HyperNetworkEq` | 235 | Neural FX | Hypernetwork-conditioned parametric equalizer |
 | `TubePreamp` | 236 | Neural FX | Triode tube preamp with transformer hysteresis |
 | `MultiBandCompressor` | 237 | Dynamics | 3-band State-Space Model dynamic compressor |
-| `Reverb` | 238 | FX | Schroeder/Freeverb comb and all-pass filter network |
+| `Reverb` | 238 | FX ⚠️ | **4+2** Freeverb comb/all-pass network (canonical is 8+4). **Delay lengths hardcoded to 44.1 kHz with no path to the session rate**; **identical impulse response in both channels → zero stereo width**; 384 KB struct for 1356 samples of delay. Debt §2.1 |
 | `ModulationFx` | 239 | FX | Multi-mode LFO insert (Chorus, Flanger, Phaser) |
 | `Compressor` | 240 | Dynamics | Peak/RMS dynamic range compressor |
 | `StereoUtility` | 241 | Utility | Balance, width, and phase correlation utility |
@@ -181,7 +196,7 @@
 | `multiband-compressor` | NeuralProcessor | `neural`, `insert`, `real-time`, `ssm`, `compressor`, `multiband` | 3-Band crossover feeding parallel SSM compression cells |
 | `algorithmic-delay` | Insert | `algorithmic`, `insert`, `real-time`, `delay` | Low-latency delay line with Hermite fractional interpolation |
 | `algorithmic-eq` | Insert | `algorithmic`, `insert`, `real-time`, `eq`, `filter` | Multi-mode State-Variable Filter (LP, HP, BP, Notch) |
-| `algorithmic-reverb` | Insert | `algorithmic`, `insert`, `real-time`, `reverb` | Schroeder/Freeverb comb and all-pass filter network |
+| `algorithmic-reverb` | Insert | `algorithmic`, `insert`, `real-time`, `reverb` | Schroeder/Freeverb comb and all-pass network. ⚠️ Resolves to the **in-process** `Reverb` type via `SwapProcessor`, not the sidecar — see debt §3.5. Carries the §2.1 defects |
 | `algorithmic-modulation` | Insert | `algorithmic`, `insert`, `real-time`, `modulation`, `chorus` | Multi-mode LFO insert (Chorus, Flanger, Phaser) |
 | `algorithmic-synth` | Instrument | `algorithmic`, `instrument`, `real-time` | Dual-oscillator MIDI synthesizer instrument |
 | `neural-visuals` | NeuralProcessor | `visual`, `neural`, `insert`, `real-time`, `instrument` | Audio & telemetry input driven neural visual surface sidecar |
@@ -209,6 +224,19 @@
 ---
 
 **Legend:**
-- ✅ **Hardened**: Fully implemented, reachability-verified, RT-safe, and green in CI.
-- 🔶 **Active**: Functional implementation undergoing active refinement.
-- 🧪 **Prototype**: Research prototype or experimental hardware spec.
+- ✅ **Hardened**: implemented, reachability-verified (`reachability_gate_test.rs`), RT-safe (`conformance_gauntlet.rs`), green in the test suite.
+- ⚠️ **Reachable with a measured limitation**: a user can get to it and it does something, but a named defect or quality ceiling applies. Every ⚠️ row cites the entry in [`TECHNICAL_DEBT_AND_STUBS.md`](./TECHNICAL_DEBT_AND_STUBS.md).
+- 🔶 **Active**: functional implementation undergoing active refinement.
+- 🧪 **Prototype**: research prototype or experimental hardware spec.
+
+**What ✅ does not mean.** It does not mean *good*, and it does not mean *the
+gate is green* — see the two caveats at the top of this file. Reachability and
+quality are separate axes, and this matrix tracks reachability. For quality, read
+[ARCHITECTURE.md §1.1.1](../system/ARCHITECTURE.md) (which rows of the DSP are
+reference-grade and which are placeholders) and §4 of the
+[master audit](./REVERSE_ENGINEERING_SYSTEM_REPORT_2026.md).
+
+> **Not re-verified on 2026-10-08:** the `.clac` container, stem separation, the
+> DNA network/consensus layers, and the 9 visual engines in §8.3. Their rows are
+> carried forward from the July pass. Treat them as claims until a probe or a
+> test is attached, per `AGENTS.md` §4.
