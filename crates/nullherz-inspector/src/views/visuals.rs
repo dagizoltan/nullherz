@@ -910,7 +910,7 @@ pub fn render_visuals_view(app: &mut InspectorApp, ui: &mut egui::Ui, telemetry:
                             .fill(theme.bg_inset)
                             .rounding(egui::Rounding::same(theme.radius_sm))
                             .inner_margin(egui::Margin::symmetric(6.0, 2.0))
-                            .stroke(egui::Stroke::new(1.0, theme.border_stroke.color))
+                            .stroke(egui::Stroke::new(1.0_f32, theme.border_stroke.color))
                             .show(ui, |ui| {
                                 ui.label(egui::RichText::new(format!("{} LAYERS ACTIVE", active_layer_count)).size(9.0).strong().color(theme.success));
                             });

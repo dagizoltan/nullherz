@@ -29,9 +29,9 @@ fn render_studio_action_card(
     };
 
     let border_stroke = if response.hovered() && enabled {
-        Stroke::new(1.5, accent_color)
+        Stroke::new(1.5_f32, accent_color)
     } else {
-        Stroke::new(1.0, theme.border_stroke.color)
+        Stroke::new(1.0_f32, theme.border_stroke.color)
     };
 
     // Card background & rounded border
@@ -50,7 +50,7 @@ fn render_studio_action_card(
         let (badge_rect, _) = ui.allocate_exact_size(icon_badge_size, Sense::hover());
         let badge_bg = if enabled { accent_color.linear_multiply(0.12) } else { theme.bg_inset };
         ui.painter().rect_filled(badge_rect, theme.radius_sm, badge_bg);
-        ui.painter().rect_stroke(badge_rect, theme.radius_sm, Stroke::new(1.0, icon_color.linear_multiply(0.4)));
+        ui.painter().rect_stroke(badge_rect, theme.radius_sm, Stroke::new(1.0_f32, icon_color.linear_multiply(0.4)));
         ui.painter().text(
             badge_rect.center(),
             Align2::CENTER_CENTER,
@@ -90,7 +90,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
             Frame::none()
                 .fill(theme.bg_surface)
                 .rounding(theme.radius_md)
-                .stroke(Stroke::new(1.0, theme.border))
+                .stroke(Stroke::new(1.0_f32, theme.border))
                 .inner_margin(Margin::same(theme.space_md))
                 .show(ui, |ui| {
                     ui.vertical(|ui| {
@@ -122,7 +122,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                                             .size(theme.type_caption)
                                             .strong()
                                             .color(deck_color)
-                                    ).fill(theme.bg_inset).stroke(Stroke::new(1.0, deck_color.linear_multiply(0.5)));
+                                    ).fill(theme.bg_inset).stroke(Stroke::new(1.0_f32, deck_color.linear_multiply(0.5)));
 
                                     if ui.add(btn).on_hover_text(format!("Load track into Deck {}", deck_char)).clicked() {
                                         let _ = app.command_sender.send(nullherz_traits::Command::Performance(
@@ -144,7 +144,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                             Frame::none()
                                 .fill(theme.accent.linear_multiply(0.15))
                                 .rounding(theme.radius_sm)
-                                .stroke(Stroke::new(1.0, theme.accent))
+                                .stroke(Stroke::new(1.0_f32, theme.accent))
                                 .inner_margin(Margin::symmetric(6.0, 2.0))
                                 .show(ui, |ui| {
                                     ui.label(RichText::new(&ext).strong().size(10.0).color(theme.accent));
@@ -156,7 +156,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                             Frame::none()
                                 .fill(theme.bg_inset)
                                 .rounding(theme.radius_sm)
-                                .stroke(Stroke::new(1.0, theme.border_stroke.color))
+                                .stroke(Stroke::new(1.0_f32, theme.border_stroke.color))
                                 .inner_margin(Margin::symmetric(6.0, 2.0))
                                 .show(ui, |ui| {
                                     ui.label(RichText::new(format!("{:.1} kHz", sample_rate as f32 / 1000.0)).size(10.0).color(theme.text_primary));
@@ -168,7 +168,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                             Frame::none()
                                 .fill(theme.bg_inset)
                                 .rounding(theme.radius_sm)
-                                .stroke(Stroke::new(1.0, theme.border_stroke.color))
+                                .stroke(Stroke::new(1.0_f32, theme.border_stroke.color))
                                 .inner_margin(Margin::symmetric(6.0, 2.0))
                                 .show(ui, |ui| {
                                     let ch_str = if track.metadata.channels == 1 { "Mono 1ch" } else { "Stereo 2ch" };
@@ -181,7 +181,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                             Frame::none()
                                 .fill(theme.bg_inset)
                                 .rounding(theme.radius_sm)
-                                .stroke(Stroke::new(1.0, theme.border_stroke.color))
+                                .stroke(Stroke::new(1.0_f32, theme.border_stroke.color))
                                 .inner_margin(Margin::symmetric(6.0, 2.0))
                                 .show(ui, |ui| {
                                     let mins = (total_duration_sec / 60.0) as u32;
@@ -196,7 +196,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                             Frame::none()
                                 .fill(theme.bg_inset)
                                 .rounding(theme.radius_sm)
-                                .stroke(Stroke::new(1.0, theme.border_stroke.color))
+                                .stroke(Stroke::new(1.0_f32, theme.border_stroke.color))
                                 .inner_margin(Margin::symmetric(6.0, 2.0))
                                 .show(ui, |ui| {
                                     ui.label(RichText::new(format!("BPM: {:.2}", track.metadata.bpm)).size(10.0).color(theme.success));
@@ -208,7 +208,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                             Frame::none()
                                 .fill(theme.bg_inset)
                                 .rounding(theme.radius_sm)
-                                .stroke(Stroke::new(1.0, theme.border_stroke.color))
+                                .stroke(Stroke::new(1.0_f32, theme.border_stroke.color))
                                 .inner_margin(Margin::symmetric(6.0, 2.0))
                                 .show(ui, |ui| {
                                     ui.label(RichText::new(format!("KEY: {:?}", track.metadata.root_key)).size(10.0).color(theme.warning));
@@ -234,7 +234,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
             Frame::none()
                 .fill(theme.bg_surface)
                 .rounding(theme.radius_sm)
-                .stroke(Stroke::new(1.0, theme.border))
+                .stroke(Stroke::new(1.0_f32, theme.border))
                 .inner_margin(Margin::symmetric(theme.space_md, theme.space_xs))
                 .show(ui, |ui| {
                     ui.horizontal(|ui| {
@@ -369,13 +369,13 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
             let viewport_right = m_rect.left() + end_ratio * m_rect.width();
             let vp_rect = Rect::from_min_max(pos2(viewport_left, m_rect.top()), pos2(viewport_right, m_rect.bottom()));
             ui.painter().rect_filled(vp_rect, 0.0, theme.accent.linear_multiply(0.25));
-            ui.painter().rect_stroke(vp_rect, 0.0, Stroke::new(1.5, theme.accent));
+            ui.painter().rect_stroke(vp_rect, 0.0, Stroke::new(1.5_f32, theme.accent));
 
             // Render playhead indicator line on minimap
             let playhead_x = m_rect.left() + app.editor.editor_playhead_pos * m_rect.width();
             ui.painter().line_segment(
                 [pos2(playhead_x, m_rect.top()), pos2(playhead_x, m_rect.bottom())],
-                Stroke::new(2.0, theme.warning),
+                Stroke::new(2.0_f32, theme.warning),
             );
 
             // Interactive Minimap Viewport Dragging / Clicking
@@ -402,7 +402,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
             ui.painter().rect_filled(ruler_rect, theme.radius_sm, theme.bg_surface);
             ui.painter().line_segment(
                 [pos2(rect.left(), rect.min.y + ruler_height), pos2(rect.right(), rect.min.y + ruler_height)],
-                Stroke::new(1.0, theme.border_stroke.color),
+                Stroke::new(1.0_f32, theme.border_stroke.color),
             );
 
             // Draw time ticks across ruler
@@ -418,7 +418,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
 
                 ui.painter().line_segment(
                     [pos2(x, rect.min.y + ruler_height - 6.0), pos2(x, rect.min.y + ruler_height)],
-                    Stroke::new(1.0, theme.text_secondary),
+                    Stroke::new(1.0_f32, theme.text_secondary),
                 );
 
                 ui.painter().text(
@@ -476,7 +476,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                 if right > left {
                     let sel_rect = Rect::from_min_max(pos2(left, wf_rect.top()), pos2(right, wf_rect.bottom()));
                     ui.painter().rect_filled(sel_rect, 0.0, theme.accent.linear_multiply(0.2));
-                    ui.painter().rect_stroke(sel_rect, 0.0, Stroke::new(1.0, theme.accent));
+                    ui.painter().rect_stroke(sel_rect, 0.0, Stroke::new(1.0_f32, theme.accent));
                 }
             }
 
@@ -521,7 +521,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                 let playhead_x = wf_rect.left() + norm_playhead_x * wf_rect.width();
                 ui.painter().line_segment(
                     [pos2(playhead_x, rect.top()), pos2(playhead_x, rect.bottom())],
-                    Stroke::new(2.0, theme.warning),
+                    Stroke::new(2.0_f32, theme.warning),
                 );
             }
 
@@ -580,7 +580,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
             Frame::none()
                 .fill(theme.bg_surface)
                 .rounding(theme.radius_md)
-                .stroke(Stroke::new(1.0, theme.border))
+                .stroke(Stroke::new(1.0_f32, theme.border))
                 .inner_margin(Margin::same(theme.space_md))
                 .show(ui, |ui| {
                     ui.vertical(|ui| {
@@ -591,7 +591,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                                 Frame::none()
                                     .fill(theme.bg_inset)
                                     .rounding(theme.radius_sm)
-                                    .stroke(Stroke::new(1.0, theme.border_stroke.color))
+                                    .stroke(Stroke::new(1.0_f32, theme.border_stroke.color))
                                     .inner_margin(Margin::symmetric(6.0, 2.0))
                                     .show(ui, |ui| {
                                         ui.label(RichText::new("32-BIT FLOAT PRECISION").size(9.0).strong().color(theme.success));
@@ -744,7 +744,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui) {
                         Frame::none()
                             .fill(theme.bg_inset)
                             .rounding(theme.radius_md)
-                            .stroke(Stroke::new(1.0, theme.border_stroke.color))
+                            .stroke(Stroke::new(1.0_f32, theme.border_stroke.color))
                             .inner_margin(Margin::same(theme.space_sm))
                             .show(ui, |ui| {
                                 ui.horizontal(|ui| {

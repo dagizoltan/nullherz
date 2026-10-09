@@ -487,7 +487,7 @@ fn render_audio_card_grid_item(
     Frame::none()
         .fill(if is_selected { theme.accent.linear_multiply(0.10) } else { theme.bg_surface })
         .rounding(Rounding::same(theme.radius_md))
-        .stroke(Stroke::new(1.0, if is_loaded { theme.accent } else { theme.border }))
+        .stroke(Stroke::new(1.0_f32, if is_loaded { theme.accent } else { theme.border }))
         .inner_margin(Margin::same(theme.space_sm))
         .show(ui, |ui| {
             ui.set_width(card_w);

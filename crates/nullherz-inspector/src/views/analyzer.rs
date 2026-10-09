@@ -77,7 +77,7 @@ fn format_freq_hz(hz: f32) -> String {
 fn render_filter_pill(ui: &mut Ui, theme: &Theme, label: &str, active: &mut bool) {
     let bg_color = if *active { theme.accent.linear_multiply(0.2) } else { theme.bg_inset };
     let text_color = if *active { theme.accent } else { theme.text_secondary };
-    let border_stroke = if *active { Stroke::new(1.0, theme.accent) } else { Stroke::new(1.0, theme.border_stroke.color) };
+    let border_stroke = if *active { Stroke::new(1.0_f32, theme.accent) } else { Stroke::new(1.0_f32, theme.border_stroke.color) };
 
     let btn = egui::Button::new(RichText::new(label).size(9.0).strong().color(text_color))
         .fill(bg_color)
@@ -99,7 +99,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                 Frame::none()
                     .fill(theme.bg_surface)
                     .rounding(theme.radius_md)
-                    .stroke(Stroke::new(1.0, theme.border))
+                    .stroke(Stroke::new(1.0_f32, theme.border))
                     .inner_margin(Margin::symmetric(theme.space_md, theme.space_xs))
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
@@ -158,7 +158,7 @@ fn render_realtime_screen(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Optio
     Frame::none()
         .fill(theme.bg_surface)
         .rounding(theme.radius_sm)
-        .stroke(Stroke::new(1.0, theme.border))
+        .stroke(Stroke::new(1.0_f32, theme.border))
         .inner_margin(Margin::symmetric(theme.space_md, theme.space_xs))
         .show(ui, |ui| {
             ui.horizontal_wrapped(|ui| {
@@ -238,7 +238,7 @@ fn render_realtime_screen(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Optio
             let x = rect.left() + (bin_idx as f32 / 128.0) * rect.width();
             ui.painter().line_segment(
                 [pos2(x, rect.top()), pos2(x, rect.bottom())],
-                Stroke::new(1.0, theme.border_stroke.color.linear_multiply(0.3)),
+                Stroke::new(1.0_f32, theme.border_stroke.color.linear_multiply(0.3)),
             );
             ui.painter().text(
                 pos2(x + 2.0, rect.bottom() - 14.0),
@@ -257,7 +257,7 @@ fn render_realtime_screen(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Optio
             if y >= rect.top() && y <= rect.bottom() {
                 ui.painter().line_segment(
                     [pos2(rect.left(), y), pos2(rect.right(), y)],
-                    Stroke::new(1.0, theme.border_stroke.color.linear_multiply(0.2)),
+                    Stroke::new(1.0_f32, theme.border_stroke.color.linear_multiply(0.2)),
                 );
                 ui.painter().text(
                     pos2(rect.right() - 4.0, y - 2.0),
@@ -372,7 +372,7 @@ fn render_realtime_screen(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Optio
                     // Draw vertical guideline
                     ui.painter().line_segment(
                         [pos2(pos.x, rect.top()), pos2(pos.x, rect.bottom())],
-                        Stroke::new(1.0, theme.accent.linear_multiply(0.6)),
+                        Stroke::new(1.0_f32, theme.accent.linear_multiply(0.6)),
                     );
 
                     // Draw hover tooltip pill
@@ -383,7 +383,7 @@ fn render_realtime_screen(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Optio
                     );
                     let pill_rect = Rect::from_min_size(pill_pos, Vec2::new(140.0, 20.0));
                     ui.painter().rect_filled(pill_rect, theme.radius_sm, Color32::from_rgb(20, 28, 42));
-                    ui.painter().rect_stroke(pill_rect, theme.radius_sm, Stroke::new(1.0, theme.accent));
+                    ui.painter().rect_stroke(pill_rect, theme.radius_sm, Stroke::new(1.0_f32, theme.accent));
                     ui.painter().text(
                         pill_rect.center(),
                         Align2::CENTER_CENTER,
@@ -509,9 +509,9 @@ fn render_realtime_screen(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Optio
             let radius = 80.0;
 
             // Draw Lissajous crosshairs (M/S axes)
-            ui.painter().circle_stroke(center, radius, Stroke::new(1.0, theme.border));
-            ui.painter().line_segment([pos2(center.x - radius, center.y), pos2(center.x + radius, center.y)], Stroke::new(1.0, theme.border));
-            ui.painter().line_segment([pos2(center.x, center.y - radius), pos2(center.x, center.y + radius)], Stroke::new(1.0, theme.border));
+            ui.painter().circle_stroke(center, radius, Stroke::new(1.0_f32, theme.border));
+            ui.painter().line_segment([pos2(center.x - radius, center.y), pos2(center.x + radius, center.y)], Stroke::new(1.0_f32, theme.border));
+            ui.painter().line_segment([pos2(center.x, center.y - radius), pos2(center.x, center.y + radius)], Stroke::new(1.0_f32, theme.border));
 
             ui.painter().text(pos2(center.x, center.y - radius - 8.0), Align2::CENTER_CENTER, "+M (Mono)", FontId::proportional(8.0), theme.text_secondary);
             ui.painter().text(pos2(center.x + radius + 12.0, center.y), Align2::CENTER_CENTER, "+S (Side)", FontId::proportional(8.0), theme.text_secondary);
@@ -527,7 +527,7 @@ fn render_realtime_screen(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Optio
             }
 
             for i in 0..points.len().saturating_sub(1) {
-                ui.painter().line_segment([points[i], points[i + 1]], Stroke::new(1.2, theme.accent.linear_multiply(0.8)));
+                ui.painter().line_segment([points[i], points[i + 1]], Stroke::new(1.2_f32, theme.accent.linear_multiply(0.8)));
             }
 
             // Phase correlation indicator
@@ -625,7 +625,7 @@ fn render_full_track_screen(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Opt
     Frame::none()
         .fill(theme.bg_surface)
         .rounding(theme.radius_sm)
-        .stroke(Stroke::new(1.0, theme.border))
+        .stroke(Stroke::new(1.0_f32, theme.border))
         .inner_margin(Margin::symmetric(theme.space_md, theme.space_xs))
         .show(ui, |ui| {
             ui.horizontal(|ui| {
@@ -765,14 +765,14 @@ fn render_full_track_screen(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Opt
                             let (r_rect, _) = ui.allocate_exact_size(radar_size, Sense::hover());
 
                             ui.painter().rect_filled(r_rect, theme.radius_sm, Color32::from_rgb(10, 14, 22));
-                            ui.painter().rect_stroke(r_rect, theme.radius_sm, Stroke::new(1.0, theme.border));
+                            ui.painter().rect_stroke(r_rect, theme.radius_sm, Stroke::new(1.0_f32, theme.border));
 
                             let r_center = r_rect.center();
                             let r_max_radius = 65.0;
 
                             // Concentric radar rings
                             for ring in &[0.33f32, 0.66, 1.0] {
-                                ui.painter().circle_stroke(r_center, r_max_radius * ring, Stroke::new(1.0, theme.border.linear_multiply(0.5)));
+                                ui.painter().circle_stroke(r_center, r_max_radius * ring, Stroke::new(1.0_f32, theme.border.linear_multiply(0.5)));
                             }
 
                             let latent = &track.metadata.dna.spectral.latent_space;
@@ -790,14 +790,14 @@ fn render_full_track_screen(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Opt
                                 // Draw radial spokes
                                 let edge_x = r_center.x + angle.cos() * r_max_radius;
                                 let edge_y = r_center.y + angle.sin() * r_max_radius;
-                                ui.painter().line_segment([r_center, pos2(edge_x, edge_y)], Stroke::new(1.0, theme.border.linear_multiply(0.3)));
+                                ui.painter().line_segment([r_center, pos2(edge_x, edge_y)], Stroke::new(1.0_f32, theme.border.linear_multiply(0.3)));
                             }
 
                             // Fill SoundDNA radar polygon
                             if polygon_pts.len() >= 3 {
                                 for i in 0..16 {
                                     let next_i = (i + 1) % 16;
-                                    ui.painter().line_segment([polygon_pts[i], polygon_pts[next_i]], Stroke::new(1.5, theme.accent));
+                                    ui.painter().line_segment([polygon_pts[i], polygon_pts[next_i]], Stroke::new(1.5_f32, theme.accent));
                                 }
                             }
                         });
