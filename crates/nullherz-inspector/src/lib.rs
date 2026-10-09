@@ -11,6 +11,7 @@ use std::sync::mpsc;
 use nullherz_dna::GeneticLibrary;
 
 mod views;
+pub(crate) mod fx_rack;
 #[cfg(test)]
 mod ui_harness;
 pub(crate) mod state;

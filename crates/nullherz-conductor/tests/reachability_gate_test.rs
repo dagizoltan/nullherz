@@ -163,8 +163,17 @@ fn test_ui_node_names_resolve_in_the_bootstrapped_graph() {
         "preview_node".into(),
     ];
     for deck in ['a', 'b', 'c', 'd'] {
-        for suffix in ["sampler", "gain", "filter", "isolator", "sequencer"] {
+        for suffix in ["sampler", "gain", "filter", "isolator", "sequencer", "pitch_slot", "dna_slot", "stem_matrix"] {
             required.push(format!("deck_{deck}_{suffix}"));
+        }
+        // FX insert slots. Their absence from this list is exactly how the
+        // one-slot/unbounded-rack mismatch survived a gate built to catch this
+        // class of bug: the store view resolved `deck_<x>_fx<n>` through a
+        // `format!`, so the literal scraper below could not see it, and the
+        // explicit list that is supposed to cover `format!` lookups did not
+        // name it. Every slot the UI can address must be in the graph.
+        for slot in 1..=nullherz_mixer::DECK_FX_SLOT_COUNT {
+            required.push(format!("deck_{deck}_fx{slot}"));
         }
     }
 
@@ -253,6 +262,59 @@ fn declared_literal_node_indices() -> Vec<(&'static str, &'static str)> {
     )]
 }
 
+/// Flag any `get_node_id(..)` chain that ends in a default instead of a skip.
+///
+/// Matches the whole statement, not one line, because the offending form spans
+/// several: the lookup, one or more `.or_else(..)` alternatives, then
+/// `.unwrap_or(..)` / `.unwrap_or_else(..)` / `.unwrap_or_default()`.
+fn scan_defaulted_lookups(dir: &std::path::Path, out: &mut Vec<(String, String)>) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            scan_defaulted_lookups(&path, out);
+            continue;
+        }
+        if path.extension().is_none_or(|e| e != "rs") {
+            continue;
+        }
+        let Ok(text) = std::fs::read_to_string(&path) else { continue };
+        let lines: Vec<&str> = text.lines().collect();
+        let mut in_tests = false;
+        for (i, line) in lines.iter().enumerate() {
+            if line.trim().contains("#[cfg(test)]") {
+                in_tests = true;
+            }
+            if in_tests || line.trim().starts_with("//") {
+                continue;
+            }
+            if !line.contains("get_node_id(") {
+                continue;
+            }
+            // Join this line with the next few, skipping comment lines, so a
+            // chain broken across lines is still one expression to match.
+            let stmt: String = lines[i..(i + 5).min(lines.len())]
+                .iter()
+                .map(|l| l.trim())
+                .filter(|l| !l.starts_with("//"))
+                .collect::<Vec<_>>()
+                .join(" ");
+            let Some(stmt) = stmt.split(';').next() else { continue };
+            if stmt.contains("unwrap_or") {
+                out.push((
+                    path.file_name().unwrap().to_string_lossy().into_owned(),
+                    format!(
+                        "{}:{}: a node lookup falls back to a default instead of skipping: {}",
+                        path.file_name().unwrap().to_string_lossy(),
+                        i + 1,
+                        line.trim()
+                    ),
+                ));
+            }
+        }
+    }
+}
+
 /// Node indices must come from a name lookup, never from a literal.
 ///
 /// The Breeder view shipped `target_node_idx: 150` — that is
@@ -320,6 +382,22 @@ fn test_ui_views_do_not_hardcode_node_indices() {
     }
     let mut found: Vec<(String, String)> = Vec::new();
     scan(std::path::Path::new(views), &TARGET_FIELDS, &mut found);
+
+    // A DEFAULTED lookup is the same defect wearing a variable binding.
+    //
+    // The scan above only sees `node_idx: <digit>` in a struct literal, so it
+    // could not see what the store view actually shipped:
+    //
+    //     let node_idx = app.get_node_id(&deck_str)
+    //         .or_else(|| app.get_node_id(&alias))
+    //         .unwrap_or(i as u32 * 4 + 2);
+    //
+    // By the time `node_idx` reached the command it was shorthand, and the
+    // literal was arithmetic rather than a bare digit — two reasons the gate
+    // stayed green over a hardcoded graph index in a view. `AGENTS.md` §3 is
+    // unconditional: resolve by name, and SKIP the command when the lookup
+    // fails. There is no correct default, because a wrong node is a real node.
+    scan_defaulted_lookups(std::path::Path::new(views), &mut found);
 
     let declared: Vec<&str> = declared_literal_node_indices().iter().map(|(f, _)| *f).collect();
     for (file, report) in found {

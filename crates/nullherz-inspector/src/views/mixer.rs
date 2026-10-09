@@ -157,53 +157,198 @@ fn render_add_channel_button(app: &mut InspectorApp, ui: &mut Ui) {
         });
 }
 
-fn render_channel_fx_rack_item(app: &mut InspectorApp, ui: &mut Ui, ch_idx: usize, fx_idx: usize, accent_color: Color32) {
-    ui.push_id(("ch_fx", ch_idx, fx_idx), |ui| {
+/// The deck's DJ isolator node — what the strip's 3-band EQ actually controls.
+fn channel_isolator_node(app: &InspectorApp, ch_idx: usize) -> Option<u32> {
+    let deck_char = (b'a' + (ch_idx % crate::fx_rack::DECK_COUNT) as u8) as char;
+    app.get_node_id(&format!("deck_{}_isolator", deck_char))
+}
+
+/// The isolator's three bands, and the parameter id each one occupies.
+#[derive(Clone, Copy)]
+enum EqBand {
+    Low = 0,
+    Mid = 1,
+    High = 2,
+}
+
+/// Push a channel's EQ band to its isolator.
+///
+/// Every control that writes `channel_eq_*` must go through this. There used to
+/// be three separate places that wrote those fields and only ONE of them sent
+/// anything: the rack's label-matched EQ item. The strip's own HI/MID/LOW knobs
+/// and the draggable EQ curve both moved the displayed value and left the audio
+/// alone, so the console showed three different EQs and sounded like one.
+fn send_channel_eq(app: &InspectorApp, ch_idx: usize, band: EqBand) {
+    let Some(node_id) = channel_isolator_node(app, ch_idx) else { return };
+    let value = match band {
+        EqBand::Low => app.mixer.channel_eq_low[ch_idx],
+        EqBand::Mid => app.mixer.channel_eq_mid[ch_idx],
+        EqBand::High => app.mixer.channel_eq_high[ch_idx],
+    };
+    let _ = app.command_sender.send(nullherz_traits::Command::Mixer(
+        nullherz_traits::MixerCommand::SetParam {
+            target_id: node_id as u64,
+            param_id: band as u32,
+            value,
+            ramp_duration_samples: 128,
+        },
+    ));
+}
+
+/// TRIM and the 3-band isolator: the channel's own controls, rendered
+/// explicitly.
+///
+/// These were rack ENTRIES before — two of the three labels
+/// `DeckState::default()` seeded, which the rack renderer identified by
+/// `name_upper.contains("TRIM")` and re-pointed at the gain and isolator nodes.
+/// They are not inserts: they are fixed stages of the strip that every deck has,
+/// they cannot be removed or reordered, and binding them by label meant an
+/// operator who loaded an effect called "EQ TOASTER" got the isolator's knobs
+/// instead of the effect's.
+fn render_channel_gain_eq(
+    app: &mut InspectorApp,
+    ui: &mut Ui,
+    ch_idx: usize,
+    accent_color: Color32,
+    knob_size: f32,
+    horizontal: bool,
+) {
+    let render = |ui: &mut Ui, app: &mut InspectorApp| {
+        let mut gain_val = app.mixer.channel_gain[ch_idx];
+        if widgets::render_knob_sized(ui, &mut gain_val, 0.0..=2.0, "TRIM", accent_color, knob_size).changed() {
+            app.mixer.channel_gain[ch_idx] = gain_val;
+            update_channel_net_gain(app, ch_idx);
+        }
+
+        let mut hi = app.mixer.channel_eq_high[ch_idx];
+        if widgets::render_knob_sized(ui, &mut hi, 0.0..=2.0, "HI", accent_color, knob_size).changed() {
+            app.mixer.channel_eq_high[ch_idx] = hi;
+            send_channel_eq(app, ch_idx, EqBand::High);
+        }
+
+        let mut mid = app.mixer.channel_eq_mid[ch_idx];
+        if widgets::render_knob_sized(ui, &mut mid, 0.0..=2.0, "MID", accent_color, knob_size).changed() {
+            app.mixer.channel_eq_mid[ch_idx] = mid;
+            send_channel_eq(app, ch_idx, EqBand::Mid);
+        }
+
+        let mut low = app.mixer.channel_eq_low[ch_idx];
+        if widgets::render_knob_sized(ui, &mut low, 0.0..=2.0, "LOW", accent_color, knob_size).changed() {
+            app.mixer.channel_eq_low[ch_idx] = low;
+            send_channel_eq(app, ch_idx, EqBand::Low);
+        }
+    };
+
+    if horizontal {
+        ui.horizontal(|ui| {
+            ui.spacing_mut().item_spacing.x = 4.0;
+            render(ui, app);
+        });
+    } else {
+        ui.vertical_centered(|ui| {
+            ui.spacing_mut().item_spacing.y = 1.0;
+            render(ui, app);
+        });
+    }
+}
+
+/// One FX slot of a deck's rack — occupied or empty.
+///
+/// All `DECK_FX_SLOT_COUNT` slots render every frame, occupied or not, because
+/// the slot is a fixed position in the graph rather than an entry in a list. An
+/// empty slot shows as empty instead of being absent, which is also what makes
+/// "the rack is full" legible rather than surprising.
+fn render_channel_fx_slot(
+    app: &mut InspectorApp,
+    ui: &mut Ui,
+    ch_idx: usize,
+    slot_idx: usize,
+    accent_color: Color32,
+) {
+    ui.push_id(("ch_fx", ch_idx, slot_idx), |ui| {
         let theme = app.theme;
-        let active_deck = ch_idx % 4;
-        let insert_name = app.decks.deck_inserts[active_deck][fx_idx].clone();
-        let num_inserts = app.decks.deck_inserts[active_deck].len();
+        let deck_idx = ch_idx % crate::fx_rack::DECK_COUNT;
+        let slot = app.decks.deck_fx[deck_idx][slot_idx].clone();
+        let node_resolved = app
+            .get_node_id(&crate::fx_rack::slot_node_name(deck_idx, slot_idx))
+            .is_some();
 
         Frame::none()
             .fill(theme.bg_inset)
             .rounding(Rounding::same(theme.radius_sm))
             .inner_margin(Margin::same(2.0))
-            .stroke(Stroke::new(1.0_f32, theme.border))
+            .stroke(Stroke::new(1.0_f32, if slot.is_some() { accent_color } else { theme.border }))
             .show(ui, |ui| {
                 ui.set_width(STRIP_W - 12.0);
                 ui.vertical_centered(|ui| {
+                    let Some(insert) = slot else {
+                        // An empty slot is still a real, addressable node. Say
+                        // which one, so an unresolved slot is visible as a
+                        // disabled control rather than as a control that looks
+                        // fine and does nothing.
+                        ui.horizontal(|ui| {
+                            let label = if node_resolved {
+                                format!("FX{} —", slot_idx + 1)
+                            } else {
+                                format!("FX{} (no node)", slot_idx + 1)
+                            };
+                            ui.add(
+                                egui::Label::new(
+                                    RichText::new(label).size(7.5).color(theme.text_disabled),
+                                )
+                                .truncate(),
+                            );
+                        });
+                        return;
+                    };
+
                     ui.horizontal(|ui| {
-                        ui.add(egui::Label::new(RichText::new(&insert_name).size(7.5).strong().color(accent_color)).truncate());
+                        ui.add(
+                            egui::Label::new(
+                                RichText::new(format!("{}:{}", slot_idx + 1, insert.name))
+                                    .size(7.5)
+                                    .strong()
+                                    .color(accent_color),
+                            )
+                            .truncate(),
+                        );
 
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            // Remove button
-                            if ui.add(egui::Button::new(RichText::new("✕").size(7.0)).fill(theme.bg_inset)).clicked() {
-                                app.decks.deck_inserts[active_deck].remove(fx_idx);
-                                if fx_idx < app.decks.deck_insert_params[active_deck].len() {
-                                    app.decks.deck_insert_params[active_deck].remove(fx_idx);
-                                }
+                            // Remove: returns the node to BYPASS. This used to
+                            // drop the label only, leaving the processor in the
+                            // graph, still audible, with nothing left to
+                            // control it.
+                            if ui
+                                .add(egui::Button::new(RichText::new("✕").size(7.0)).fill(theme.bg_inset))
+                                .on_hover_text("Remove — returns this slot to bypass")
+                                .clicked()
+                            {
+                                app.fx_rack_remove(deck_idx, slot_idx);
                                 return;
                             }
 
-                            // Reorder Down
-                            if fx_idx + 1 < num_inserts {
-                                if ui.add(egui::Button::new(RichText::new("▼").size(7.0)).fill(theme.bg_inset)).clicked() {
-                                    app.decks.deck_inserts[active_deck].swap(fx_idx, fx_idx + 1);
-                                    if fx_idx + 1 < app.decks.deck_insert_params[active_deck].len() {
-                                        app.decks.deck_insert_params[active_deck].swap(fx_idx, fx_idx + 1);
-                                    }
+                            // Reorder: swaps the slots AND re-installs both
+                            // nodes, so the chain the rack shows is the chain
+                            // the audio takes. Moving an effect re-initialises
+                            // it — see `fx_rack::reorder`.
+                            if slot_idx + 1 < crate::fx_rack::DECK_FX_SLOT_COUNT {
+                                if ui
+                                    .add(egui::Button::new(RichText::new("▼").size(7.0)).fill(theme.bg_inset))
+                                    .on_hover_text("Move later in the chain (re-initialises the effect)")
+                                    .clicked()
+                                {
+                                    app.fx_rack_reorder(deck_idx, slot_idx, slot_idx + 1);
                                     return;
                                 }
                             }
 
-                            // Reorder Up
-                            if fx_idx > 0 {
-                                if ui.add(egui::Button::new(RichText::new("▲").size(7.0)).fill(theme.bg_inset)).clicked() {
-                                    app.decks.deck_inserts[active_deck].swap(fx_idx, fx_idx - 1);
-                                    if fx_idx < app.decks.deck_insert_params[active_deck].len() {
-                                        app.decks.deck_insert_params[active_deck].swap(fx_idx, fx_idx - 1);
-                                    }
-                                    return;
+                            if slot_idx > 0 {
+                                if ui
+                                    .add(egui::Button::new(RichText::new("▲").size(7.0)).fill(theme.bg_inset))
+                                    .on_hover_text("Move earlier in the chain (re-initialises the effect)")
+                                    .clicked()
+                                {
+                                    app.fx_rack_reorder(deck_idx, slot_idx, slot_idx - 1);
                                 }
                             }
                         });
@@ -211,68 +356,40 @@ fn render_channel_fx_rack_item(app: &mut InspectorApp, ui: &mut Ui, ch_idx: usiz
 
                     ui.add_space(1.0);
 
-                    let name_upper = insert_name.to_uppercase();
-                    if name_upper.contains("TRIM") || name_upper.contains("GAIN") {
-                        let mut gain_val = app.mixer.channel_gain[ch_idx];
-                        if widgets::render_knob_sized(ui, &mut gain_val, 0.0..=2.0, "GAIN", accent_color, 18.0).changed() {
-                            app.mixer.channel_gain[ch_idx] = gain_val;
-                            update_channel_net_gain(app, ch_idx);
-                        }
-                    } else if name_upper.contains("PITCH") || name_upper.contains("SPEED") {
-                        let mut pitch_val = app.mixer.channel_pitch[ch_idx];
-                        if widgets::render_knob_sized(ui, &mut pitch_val, 0.5..=2.0, "PITCH", accent_color, 18.0).changed() {
-                            app.mixer.channel_pitch[ch_idx] = pitch_val;
-                        }
-                    } else if name_upper.contains("3-BAND") || name_upper.contains("EQ") || name_upper.contains("ISOLATOR") {
-                        let iso_node = app.topo.node_map.get(&format!("deck_{}_isolator", (b'a' + active_deck as u8) as char)).copied();
-                        let mut hi = app.mixer.channel_eq_high[ch_idx];
-                        if widgets::render_knob_sized(ui, &mut hi, 0.0..=2.0, "HI", accent_color, 18.0).changed() {
-                            app.mixer.channel_eq_high[ch_idx] = hi;
-                            if let Some(node_id) = iso_node {
-                                let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
-                                    target_id: node_id as u64,
-                                    param_id: 2,
-                                    value: hi,
-                                    ramp_duration_samples: 128,
-                                }));
-                            }
-                        }
-                        ui.add_space(1.0);
-                        let mut mid = app.mixer.channel_eq_mid[ch_idx];
-                        if widgets::render_knob_sized(ui, &mut mid, 0.0..=2.0, "MID", accent_color, 18.0).changed() {
-                            app.mixer.channel_eq_mid[ch_idx] = mid;
-                            if let Some(node_id) = iso_node {
-                                let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
-                                    target_id: node_id as u64,
-                                    param_id: 1,
-                                    value: mid,
-                                    ramp_duration_samples: 128,
-                                }));
-                            }
-                        }
-                        ui.add_space(1.0);
-                        let mut low = app.mixer.channel_eq_low[ch_idx];
-                        if widgets::render_knob_sized(ui, &mut low, 0.0..=2.0, "LOW", accent_color, 18.0).changed() {
-                            app.mixer.channel_eq_low[ch_idx] = low;
-                            if let Some(node_id) = iso_node {
-                                let _ = app.command_sender.send(nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam {
-                                    target_id: node_id as u64,
-                                    param_id: 0,
-                                    value: low,
-                                    ramp_duration_samples: 128,
-                                }));
-                            }
-                        }
-                    } else {
-                        if let Some(params) = app.decks.deck_insert_params[active_deck].get_mut(fx_idx) {
-                            widgets::render_knob_sized(ui, &mut params[0], 0.0..=1.0, "MIX", accent_color, 18.0);
-                        }
+                    // The knob now SENDS. It used to render against a mirrored
+                    // array with no `command_sender.send` anywhere near it, so
+                    // every hot-loaded effect ran at its construction defaults
+                    // for the life of the session.
+                    let mut mix = insert.params[0];
+                    if widgets::render_knob_sized(ui, &mut mix, 0.0..=1.0, "MIX", accent_color, 18.0).changed() {
+                        app.fx_rack_set_param(deck_idx, slot_idx, 0, mix);
                     }
                 });
             });
     });
 }
 
+/// Sampler pad subchannel inserts — **DISPLAY ONLY, and filed as such.**
+///
+/// This is the same UI-over-nothing pattern the deck rack had, but it cannot be
+/// fixed the same way, because there is nothing to point it at: the graph has
+/// ONE `drum_machine_node` and no per-pad strip at all. Every control on a pad
+/// subchannel — the rack, the fader, GAIN, PITCH, the three EQ bands — writes
+/// `app.sampler.*` and is read by nothing (verified: no `command_sender.send`
+/// anywhere in the pad strip, and no `sampler_pad_*` name in
+/// `MixerManager::node_names`).
+///
+/// Giving the pads a real path means 16 strips. At the deck strip's shape that
+/// is 16 nodes for gain alone and 64 for four insert slots each, against 57
+/// nodes of headroom left after the deck racks (`graph_budget`: 71 of
+/// `MAX_NODES` = 128). So it is not a wiring oversight to patch — it needs a
+/// design decision about what a pad strip is: a shared pad bus, a smaller slot
+/// count, or a sub-mixer the pads render into.
+///
+/// Until then the remove and reorder buttons are DISABLED rather than left
+/// looking live, because a `✕` that drops a label and leaves a processor
+/// running is worse than no `✕`. Tracked in
+/// `docs/state/TECHNICAL_DEBT_AND_STUBS.md` §1.7.
 fn render_sampler_subchannel_fx_item(app: &mut InspectorApp, ui: &mut Ui, pad_idx: usize, fx_idx: usize, accent_color: Color32) {
     ui.push_id(("sampler_fx", pad_idx, fx_idx), |ui| {
         let theme = app.theme;
@@ -290,37 +407,20 @@ fn render_sampler_subchannel_fx_item(app: &mut InspectorApp, ui: &mut Ui, pad_id
                     ui.horizontal(|ui| {
                         ui.add(egui::Label::new(RichText::new(&insert_name).size(7.5).strong().color(accent_color)).truncate());
 
+                        // Remove / reorder are disabled: there is no pad node
+                        // to swap, so the old buttons edited this label list
+                        // and left whatever was "loaded" exactly where it was.
+                        // See this function's doc comment.
+                        let _ = num_inserts;
                         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                            // Remove button
-                            if ui.add(egui::Button::new(RichText::new("✕").size(7.0)).fill(theme.bg_inset)).clicked() {
-                                app.sampler.subchannel_inserts[pad_idx].remove(fx_idx);
-                                if fx_idx < app.sampler.subchannel_insert_params[pad_idx].len() {
-                                    app.sampler.subchannel_insert_params[pad_idx].remove(fx_idx);
-                                }
-                                return;
-                            }
-
-                            // Reorder Down
-                            if fx_idx + 1 < num_inserts {
-                                if ui.add(egui::Button::new(RichText::new("▼").size(7.0)).fill(theme.bg_inset)).clicked() {
-                                    app.sampler.subchannel_inserts[pad_idx].swap(fx_idx, fx_idx + 1);
-                                    if fx_idx + 1 < app.sampler.subchannel_insert_params[pad_idx].len() {
-                                        app.sampler.subchannel_insert_params[pad_idx].swap(fx_idx, fx_idx + 1);
-                                    }
-                                    return;
-                                }
-                            }
-
-                            // Reorder Up
-                            if fx_idx > 0 {
-                                if ui.add(egui::Button::new(RichText::new("▲").size(7.0)).fill(theme.bg_inset)).clicked() {
-                                    app.sampler.subchannel_inserts[pad_idx].swap(fx_idx, fx_idx - 1);
-                                    if fx_idx < app.sampler.subchannel_insert_params[pad_idx].len() {
-                                        app.sampler.subchannel_insert_params[pad_idx].swap(fx_idx, fx_idx - 1);
-                                    }
-                                    return;
-                                }
-                            }
+                            ui.add_enabled_ui(false, |ui| {
+                                ui.add(egui::Button::new(RichText::new("✕").size(7.0)).fill(theme.bg_inset));
+                            })
+                            .response
+                            .on_hover_text(
+                                "Pad subchannel inserts are display-only — the pads have no \
+                                 per-pad audio path in the graph yet (debt §1.7)",
+                            );
                         });
                     });
 
@@ -745,19 +845,44 @@ pub fn render_channel_strip_full(app: &mut InspectorApp, ui: &mut Ui, i: usize, 
                             ui.add_space(2.0);
                         }
 
-                        // Centered Column Controls Group: SORTABLE ROTARY FX RACK
+                        // TRIM + 3-BAND ISOLATOR — fixed strip stages, not
+                        // rack entries. They used to be seeded labels in the
+                        // rack that the renderer matched by string.
+                        ui.group(|ui| {
+                            ui.set_width(STRIP_W - 8.0);
+                            render_channel_gain_eq(app, ui, i, strip_accent, 18.0, false);
+                        });
+
+                        ui.add_space(2.0);
+
+                        // FX RACK — four slots, each one a graph node.
                         ui.group(|ui| {
                             ui.set_width(STRIP_W - 8.0);
                             ui.vertical_centered(|ui| {
-                                let fx_count = app.decks.deck_inserts[i % 4].len();
-                                for fx_i in 0..fx_count {
-                                    render_channel_fx_rack_item(app, ui, i, fx_i, strip_accent);
+                                for slot_i in 0..crate::fx_rack::DECK_FX_SLOT_COUNT {
+                                    render_channel_fx_slot(app, ui, i, slot_i, strip_accent);
                                     ui.add_space(2.0);
                                 }
 
-                                if ui.add_sized([STRIP_W - 12.0, 16.0], egui::Button::new(RichText::new("+ FX").size(8.0).strong()).fill(theme.bg_inset)).clicked() {
-                                    app.decks.deck_inserts[i % 4].push("CUSTOM INSERT FX".into());
-                                    app.decks.deck_insert_params[i % 4].push([1.0; 8]);
+                                // The rack is bounded by the graph, so "+ FX"
+                                // opens the catalog rather than appending a
+                                // placeholder label. It used to push
+                                // "CUSTOM INSERT FX" — an entry with no
+                                // processor behind it, which also pushed the
+                                // next real load one slot further out of range.
+                                let deck_i = i % crate::fx_rack::DECK_COUNT;
+                                let full = app.decks.deck_fx[deck_i].iter().all(|s| s.is_some());
+                                let btn = egui::Button::new(
+                                    RichText::new(if full { "RACK FULL" } else { "+ FX" }).size(8.0).strong(),
+                                )
+                                .fill(theme.bg_inset);
+                                let resp = ui.add_enabled_ui(!full, |ui| ui.add_sized([STRIP_W - 12.0, 16.0], btn)).inner;
+                                if full {
+                                    resp.on_hover_text(format!(
+                                        "All {} insert slots are loaded — remove one to free a slot",
+                                        crate::fx_rack::DECK_FX_SLOT_COUNT
+                                    ));
+                                } else if resp.clicked() {
                                     app.active_right_tab = Some(crate::RightTab::Store);
                                     app.store.active_category = Some(sidecar_sdk::AssetCategory::AudioInsert);
                                 }
@@ -1194,15 +1319,20 @@ fn render_horizontal_channel_card(app: &mut InspectorApp, ui: &mut Ui, i: usize,
                 ui.add_space(2.0);
 
                 // Quick Rotary Knobs Row: Trim, Hi, Mid, Low
+                //
+                // Through the shared renderer: this copy wrote `channel_eq_*`
+                // and sent nothing, so the same three bands behaved differently
+                // depending on which strip layout the operator happened to be
+                // looking at.
                 ui.horizontal(|ui| {
                     ui.spacing_mut().item_spacing.x = 4.0;
-                    if widgets::render_knob_sized(ui, &mut app.mixer.channel_gain[i], 0.0..=2.0, "TRIM", deck_color, 20.0).changed() {
-                        update_channel_net_gain(app, i);
-                    }
-                    widgets::render_knob_sized(ui, &mut app.mixer.channel_eq_high[i], 0.0..=2.0, "HI", deck_color, 20.0);
-                    widgets::render_knob_sized(ui, &mut app.mixer.channel_eq_mid[i], 0.0..=2.0, "MID", deck_color, 20.0);
-                    widgets::render_knob_sized(ui, &mut app.mixer.channel_eq_low[i], 0.0..=2.0, "LOW", deck_color, 20.0);
-                    widgets::render_knob_sized(ui, &mut app.mixer.channel_balance[i], 0.0..=1.0, "PAN", deck_color, 20.0);
+                    render_channel_gain_eq(app, ui, i, deck_color, 20.0, true);
+                    // PAN is display-only: nothing reads `channel_balance` but
+                    // the VU meter's left/right split. Left in place rather
+                    // than silently dropped, but it is NOT a strip control yet
+                    // — there is no pan stage in the deck graph to target.
+                    widgets::render_knob_sized(ui, &mut app.mixer.channel_balance[i], 0.0..=1.0, "PAN", deck_color, 20.0)
+                        .on_hover_text("Meter display only — the deck strip has no pan stage yet");
                 });
 
                 ui.add_space(4.0);
@@ -1298,9 +1428,21 @@ fn render_graphical_eq_canvas(
                     let dy = (mid_y - mouse_pos.y) / (height * 0.38);
                     let new_val = (1.0 + dy).clamp(0.0, 2.0);
                     match band_idx {
-                        0 => app.mixer.channel_eq_low[ch_idx] = new_val,
-                        1 => app.mixer.channel_eq_mid[ch_idx] = new_val,
-                        2 => app.mixer.channel_eq_high[ch_idx] = new_val,
+                        // Dragging the curve is an EQ change like any other:
+                        // it has to reach the isolator. It used to move the
+                        // drawn handle and nothing else.
+                        0 => {
+                            app.mixer.channel_eq_low[ch_idx] = new_val;
+                            send_channel_eq(app, ch_idx, EqBand::Low);
+                        }
+                        1 => {
+                            app.mixer.channel_eq_mid[ch_idx] = new_val;
+                            send_channel_eq(app, ch_idx, EqBand::Mid);
+                        }
+                        2 => {
+                            app.mixer.channel_eq_high[ch_idx] = new_val;
+                            send_channel_eq(app, ch_idx, EqBand::High);
+                        }
                         _ => {}
                     }
                 }

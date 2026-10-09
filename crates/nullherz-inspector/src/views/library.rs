@@ -757,13 +757,42 @@ fn render_sidecar_card_grid_item(
                         ui.label(RichText::new("LOAD TO DECK:").size(theme.type_caption).color(theme.text_disabled));
                         for (i, &deck_char) in ['A', 'B', 'C', 'D'].iter().enumerate() {
                             let deck_color = theme.deck_colors[i];
-                            if ui.button(
-                                RichText::new(format!("DECK {}", deck_char))
-                                    .size(theme.type_caption)
-                                    .color(deck_color),
-                            ).on_hover_text(format!("Load {} onto Deck {}", descriptor.name, deck_char)).clicked() {
-                                app.decks.deck_inserts[i].push(descriptor.name.clone());
-                                app.decks.deck_insert_params[i].push([0.5; 8]);
+                            // This used to push a LABEL and nothing else — no
+                            // `SwapProcessor`, no hot-load, no command of any kind. The
+                            // module appeared in the rack and never touched the audio.
+                            let rack_full = app.decks.deck_fx[i % crate::fx_rack::DECK_COUNT]
+                                .iter()
+                                .all(|s| s.is_some());
+                            let deck_btn = ui.add_enabled(
+                                !rack_full,
+                                egui::Button::new(
+                                    RichText::new(format!("DECK {}", deck_char))
+                                        .size(theme.type_caption)
+                                        .color(deck_color),
+                                ),
+                            ).on_hover_text(if rack_full {
+                                format!(
+                                    "Deck {} rack is full ({} slots) — remove an insert first",
+                                    deck_char,
+                                    crate::fx_rack::DECK_FX_SLOT_COUNT
+                                )
+                            } else {
+                                format!("Load {} onto Deck {}", descriptor.name, deck_char)
+                            });
+                            if deck_btn.clicked() {
+                                match app.fx_rack_load_sidecar(i, &descriptor.name, &descriptor.id) {
+                                    crate::fx_rack::LoadOutcome::Loaded(slot) => {
+                                        println!("Library: loaded {} into deck {} FX slot {}", descriptor.name, deck_char, slot + 1);
+                                    }
+                                    crate::fx_rack::LoadOutcome::RackFull => {
+                                        println!("Library: deck {} FX rack is full ({} slots) — {} not loaded",
+                                            deck_char, crate::fx_rack::DECK_FX_SLOT_COUNT, descriptor.name);
+                                    }
+                                    crate::fx_rack::LoadOutcome::Unresolved => {
+                                        println!("Library: deck {} has no FX slot node in the running graph — {} not loaded",
+                                            deck_char, descriptor.name);
+                                    }
+                                }
                             }
                         }
                     }
@@ -946,13 +975,42 @@ fn render_sidecar_card_in_library(
                     ui.label(RichText::new("LOAD TO DECK:").size(theme.type_caption).color(theme.text_disabled));
                     for (i, &deck_char) in ['A', 'B', 'C', 'D'].iter().enumerate() {
                         let deck_color = theme.deck_colors[i];
-                        if ui.button(
-                            RichText::new(format!("DECK {}", deck_char))
-                                .size(theme.type_caption)
-                                .color(deck_color),
-                        ).on_hover_text(format!("Load {} onto Deck {}", descriptor.name, deck_char)).clicked() {
-                            app.decks.deck_inserts[i].push(descriptor.name.clone());
-                            app.decks.deck_insert_params[i].push([0.5; 8]);
+                        // This used to push a LABEL and nothing else — no
+                        // `SwapProcessor`, no hot-load, no command of any kind. The
+                        // module appeared in the rack and never touched the audio.
+                        let rack_full = app.decks.deck_fx[i % crate::fx_rack::DECK_COUNT]
+                            .iter()
+                            .all(|s| s.is_some());
+                        let deck_btn = ui.add_enabled(
+                            !rack_full,
+                            egui::Button::new(
+                                RichText::new(format!("DECK {}", deck_char))
+                                    .size(theme.type_caption)
+                                    .color(deck_color),
+                            ),
+                        ).on_hover_text(if rack_full {
+                            format!(
+                                "Deck {} rack is full ({} slots) — remove an insert first",
+                                deck_char,
+                                crate::fx_rack::DECK_FX_SLOT_COUNT
+                            )
+                        } else {
+                            format!("Load {} onto Deck {}", descriptor.name, deck_char)
+                        });
+                        if deck_btn.clicked() {
+                            match app.fx_rack_load_sidecar(i, &descriptor.name, &descriptor.id) {
+                                crate::fx_rack::LoadOutcome::Loaded(slot) => {
+                                    println!("Library: loaded {} into deck {} FX slot {}", descriptor.name, deck_char, slot + 1);
+                                }
+                                crate::fx_rack::LoadOutcome::RackFull => {
+                                    println!("Library: deck {} FX rack is full ({} slots) — {} not loaded",
+                                        deck_char, crate::fx_rack::DECK_FX_SLOT_COUNT, descriptor.name);
+                                }
+                                crate::fx_rack::LoadOutcome::Unresolved => {
+                                    println!("Library: deck {} has no FX slot node in the running graph — {} not loaded",
+                                        deck_char, descriptor.name);
+                                }
+                            }
                         }
                     }
                 }

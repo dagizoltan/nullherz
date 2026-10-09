@@ -321,39 +321,74 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                     ui.heading(RichText::new("EXPANDED INSERTS RACK & ANALYZER").strong().size(app.theme.type_body));
                     ui.add_space(6.0);
 
-                    // Insert Rack Items List
-                    let inserts = if is_drum {
-                        app.sampler.subchannel_inserts[deck_i].clone()
-                    } else {
-                        app.decks.deck_inserts[deck_i % 4].clone()
-                    };
-
+                    // Insert Rack — the same four slots the mixer strip shows,
+                    // because they are the same graph nodes. This view used to
+                    // keep its own copy of the remove/reorder logic against the
+                    // old label list, so it could disagree with the strip about
+                    // what was loaded and neither one moved any audio.
+                    //
+                    // Drum pads have no per-pad audio path in the graph at all
+                    // (see `views::mixer::render_sampler_subchannel_fx_item`),
+                    // so their rack is shown read-only rather than offered as
+                    // something to edit.
+                    let deck_idx = deck_i % crate::fx_rack::DECK_COUNT;
                     let mut fx_to_remove = None;
-                    let mut fx_to_move_up = None;
-                    let mut fx_to_move_down = None;
-                    let total_fx = inserts.len();
+                    let mut fx_to_swap = None;
 
                     egui::ScrollArea::vertical().max_height(200.0).show(ui, |ui| {
                         ui.vertical(|ui| {
-                            for (fx_i, fx_name) in inserts.iter().enumerate() {
+                            if is_drum {
+                                for (fx_i, fx_name) in app.sampler.subchannel_inserts[deck_i].clone().iter().enumerate() {
+                                    ui.label(
+                                        RichText::new(format!("{}: {} (display only)", fx_i + 1, fx_name))
+                                            .size(10.0)
+                                            .color(app.theme.text_disabled),
+                                    )
+                                    .on_hover_text("Pad subchannel inserts have no graph node yet (debt §1.7)");
+                                }
+                                return;
+                            }
+
+                            for fx_i in 0..crate::fx_rack::DECK_FX_SLOT_COUNT {
+                                let slot = app.decks.deck_fx[deck_idx][fx_i].clone();
                                 ui.push_id(fx_i, |ui| {
                                     Frame::none()
                                         .fill(app.theme.bg_inset)
                                         .rounding(Rounding::same(app.theme.radius_sm))
-                                        .stroke(Stroke::new(1.0_f32, track_color))
+                                        .stroke(Stroke::new(
+                                            1.0_f32,
+                                            if slot.is_some() { track_color } else { app.theme.border },
+                                        ))
                                         .inner_margin(Margin::same(6.0))
                                         .show(ui, |ui| {
                                             ui.horizontal(|ui| {
-                                                ui.label(RichText::new(format!("{}: {}", fx_i + 1, fx_name)).strong().size(10.0).color(app.theme.text_primary));
+                                                match &slot {
+                                                    Some(insert) => {
+                                                        ui.label(RichText::new(format!("{}: {}", fx_i + 1, insert.name)).strong().size(10.0).color(app.theme.text_primary));
+                                                    }
+                                                    None => {
+                                                        ui.label(RichText::new(format!("{}: — empty —", fx_i + 1)).size(10.0).color(app.theme.text_disabled));
+                                                    }
+                                                }
+                                                if slot.is_none() {
+                                                    return;
+                                                }
                                                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                                                    if ui.button(RichText::new("×").strong().color(app.theme.danger)).clicked() {
+                                                    if ui.button(RichText::new("×").strong().color(app.theme.danger))
+                                                        .on_hover_text("Remove — returns this slot to bypass")
+                                                        .clicked()
+                                                    {
                                                         fx_to_remove = Some(fx_i);
                                                     }
-                                                    if fx_i < total_fx - 1 {
-                                                        if ui.button("▼").clicked() { fx_to_move_down = Some(fx_i); }
+                                                    if fx_i + 1 < crate::fx_rack::DECK_FX_SLOT_COUNT {
+                                                        if ui.button("▼").on_hover_text("Move later in the chain").clicked() {
+                                                            fx_to_swap = Some((fx_i, fx_i + 1));
+                                                        }
                                                     }
                                                     if fx_i > 0 {
-                                                        if ui.button("▲").clicked() { fx_to_move_up = Some(fx_i); }
+                                                        if ui.button("▲").on_hover_text("Move earlier in the chain").clicked() {
+                                                            fx_to_swap = Some((fx_i, fx_i - 1));
+                                                        }
                                                     }
                                                 });
                                             });
@@ -364,24 +399,13 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                         });
                     });
 
-                    if let Some(idx) = fx_to_move_up {
-                        if idx > 0 {
-                            if is_drum { app.sampler.subchannel_inserts[deck_i].swap(idx, idx - 1); }
-                            else { app.decks.deck_inserts[deck_i % 4].swap(idx, idx - 1); }
-                        }
-                    }
-                    if let Some(idx) = fx_to_move_down {
-                        if idx + 1 < total_fx {
-                            if is_drum { app.sampler.subchannel_inserts[deck_i].swap(idx, idx + 1); }
-                            else { app.decks.deck_inserts[deck_i % 4].swap(idx, idx + 1); }
-                        }
+                    // Both go through the rack helpers, so the graph moves with
+                    // the list instead of the list moving on its own.
+                    if let Some((a, b)) = fx_to_swap {
+                        app.fx_rack_reorder(deck_idx, a, b);
                     }
                     if let Some(remove_i) = fx_to_remove {
-                        if is_drum && remove_i < app.sampler.subchannel_inserts[deck_i].len() {
-                            app.sampler.subchannel_inserts[deck_i].remove(remove_i);
-                        } else if !is_drum && remove_i < app.decks.deck_inserts[deck_i % 4].len() {
-                            app.decks.deck_inserts[deck_i % 4].remove(remove_i);
-                        }
+                        app.fx_rack_remove(deck_idx, remove_i);
                     }
 
                     ui.add_space(6.0);

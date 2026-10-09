@@ -454,58 +454,57 @@ fn render_store_grid_card(
                         ui.label(RichText::new("HOT-LOAD:").size(theme.type_caption).color(theme.text_disabled));
                         for (i, &deck_char) in ['A', 'B', 'C', 'D'].iter().enumerate() {
                             let deck_color = theme.deck_colors[i];
-                            if ui.button(
-                                RichText::new(format!("DECK {}", deck_char))
-                                    .size(theme.type_caption)
-                                    .color(deck_color),
-                            ).on_hover_text(format!("Hot-load {} onto Deck {}", descriptor.name, deck_char)).clicked() {
-                                let fx_slot_idx = app.decks.deck_inserts[i].len();
-                                app.decks.deck_inserts[i].push(descriptor.name.clone());
-                                app.decks.deck_insert_params[i].push([0.5; 8]);
-
-                                let deck_str = format!("deck_{}_fx{}", deck_char.to_ascii_lowercase(), fx_slot_idx + 1);
-                                let node_idx = app.get_node_id(&deck_str)
-                                    .or_else(|| app.get_node_id(&format!("deck_{}_insert", deck_char.to_ascii_lowercase())))
-                                    .unwrap_or(i as u32 * 4 + 2);
-
-                                let p_type_id = match descriptor.id.as_str() {
-                                    "neural-saturation" => Some(nullherz_traits::ProcessorTypeId::NEURAL_SATURATOR),
-                                    "neural-filter" => Some(nullherz_traits::ProcessorTypeId::NEURAL_FILTER),
-                                    "neural-tcn" => Some(nullherz_traits::ProcessorTypeId::NEURAL_TCN),
-                                    "neural-ssm" => Some(nullherz_traits::ProcessorTypeId::NEURAL_SSM),
-                                    "neural-nam" => Some(nullherz_traits::ProcessorTypeId::NEURAL_NAM),
-                                    "hypernetwork-eq" => Some(nullherz_traits::ProcessorTypeId::HYPERNETWORK_EQ),
-                                    "tube-preamp" => Some(nullherz_traits::ProcessorTypeId::TUBE_PREAMP),
-                                    "multiband-compressor" => Some(nullherz_traits::ProcessorTypeId::MULTIBAND_COMPRESSOR),
-                                    "transient-shaper" => Some(nullherz_traits::ProcessorTypeId::TRANSIENT_SHAPER),
-                                    "tape-saturator" => Some(nullherz_traits::ProcessorTypeId::TAPE_SATURATOR),
-                                    "mutator" => Some(nullherz_traits::ProcessorTypeId::MUTATOR),
-                                    "algorithmic-reverb" => Some(nullherz_traits::ProcessorTypeId::REVERB),
-                                    "algorithmic-modulation" => Some(nullherz_traits::ProcessorTypeId::MODULATION_FX),
-                                    "algorithmic-delay" => Some(nullherz_traits::ProcessorTypeId::DELAY),
-                                    "algorithmic-eq" => Some(nullherz_traits::ProcessorTypeId::BIQUAD),
-                                    _ => None,
-                                };
-
-                                if let Some(type_id) = p_type_id {
-                                    let _ = app.command_sender.send(nullherz_traits::Command::Topology(
-                                        nullherz_traits::TopologyCommand::SwapProcessor {
-                                            node_idx,
-                                            processor_type_id: type_id,
-                                        }
-                                    ));
-                                } else {
-                                    let mut name_bytes = [0u8; 32];
-                                    let b = descriptor.id.as_bytes();
-                                    let len = b.len().min(32);
-                                    name_bytes[..len].copy_from_slice(&b[..len]);
-
-                                    let _ = app.command_sender.send(nullherz_traits::Command::Core(
-                                        nullherz_traits::CoreCommand::HotLoadSidecar {
-                                            name: name_bytes,
-                                            node_idx,
-                                        }
-                                    ));
+                            // Four slots per deck, and no more: the rack is bounded by the
+                            // graph. A disabled button is the honest way to say "full" —
+                            // the old unbounded list accepted the click and overwrote
+                            // whatever was already in slot 1.
+                            let rack_full = app.decks.deck_fx[i % crate::fx_rack::DECK_COUNT]
+                                .iter()
+                                .all(|s| s.is_some());
+                            let deck_btn = ui.add_enabled(
+                                !rack_full,
+                                egui::Button::new(
+                                    RichText::new(format!("DECK {}", deck_char))
+                                        .size(theme.type_caption)
+                                        .color(deck_color),
+                                ),
+                            ).on_hover_text(if rack_full {
+                                format!(
+                                    "Deck {} rack is full ({} slots) — remove an insert first",
+                                    deck_char,
+                                    crate::fx_rack::DECK_FX_SLOT_COUNT
+                                )
+                            } else {
+                                format!("Hot-load {} onto Deck {}", descriptor.name, deck_char)
+                            });
+                            if deck_btn.clicked() {
+                                // One call: picks the deck's first free slot, resolves that slot's
+                                // node by name, and sends the swap (or the sidecar hot-load) only if
+                                // it resolves.
+                                //
+                                // What used to be here appended a label to an unbounded list, looked
+                                // up `deck_<x>_fx<len+1>`, fell back to the `deck_<x>_insert` alias,
+                                // and finally to `.unwrap_or(i as u32 * 4 + 2)` — a hardcoded node
+                                // index in a view, which `AGENTS.md` §3 forbids. Because the rack was
+                                // seeded with three non-node labels, the FIRST load already took the
+                                // alias path, and every load after it resolved the same node and
+                                // replaced its predecessor.
+                                match app.fx_rack_load_sidecar(i, &descriptor.name, &descriptor.id) {
+                                    crate::fx_rack::LoadOutcome::Loaded(slot) => {
+                                        println!("Store: loaded {} into deck {} FX slot {}", descriptor.name, deck_char, slot + 1);
+                                    }
+                                    // The button is disabled when the rack is full, so these two are
+                                    // the paths a disabled button cannot cover. Reported rather than
+                                    // swallowed: a load that did not happen must not look like one
+                                    // that did.
+                                    crate::fx_rack::LoadOutcome::RackFull => {
+                                        println!("Store: deck {} FX rack is full ({} slots) — {} not loaded",
+                                            deck_char, crate::fx_rack::DECK_FX_SLOT_COUNT, descriptor.name);
+                                    }
+                                    crate::fx_rack::LoadOutcome::Unresolved => {
+                                        println!("Store: deck {} has no FX slot node in the running graph — {} not loaded",
+                                            deck_char, descriptor.name);
+                                    }
                                 }
                             }
                         }
@@ -716,58 +715,57 @@ fn render_sidecar_card(
                     ui.label(RichText::new("HOT-LOAD:").size(theme.type_caption).color(theme.text_disabled));
                     for (i, &deck_char) in ['A', 'B', 'C', 'D'].iter().enumerate() {
                         let deck_color = theme.deck_colors[i];
-                        if ui.button(
-                            RichText::new(format!("DECK {}", deck_char))
-                                .size(theme.type_caption)
-                                .color(deck_color),
-                        ).on_hover_text(format!("Hot-load {} onto Deck {}", descriptor.name, deck_char)).clicked() {
-                            let fx_slot_idx = app.decks.deck_inserts[i].len();
-                            app.decks.deck_inserts[i].push(descriptor.name.clone());
-                            app.decks.deck_insert_params[i].push([0.5; 8]);
-
-                            let deck_str = format!("deck_{}_fx{}", deck_char.to_ascii_lowercase(), fx_slot_idx + 1);
-                            let node_idx = app.get_node_id(&deck_str)
-                                .or_else(|| app.get_node_id(&format!("deck_{}_insert", deck_char.to_ascii_lowercase())))
-                                .unwrap_or(i as u32 * 4 + 2);
-
-                            let p_type_id = match descriptor.id.as_str() {
-                                "neural-saturation" => Some(nullherz_traits::ProcessorTypeId::NEURAL_SATURATOR),
-                                "neural-filter" => Some(nullherz_traits::ProcessorTypeId::NEURAL_FILTER),
-                                "neural-tcn" => Some(nullherz_traits::ProcessorTypeId::NEURAL_TCN),
-                                "neural-ssm" => Some(nullherz_traits::ProcessorTypeId::NEURAL_SSM),
-                                "neural-nam" => Some(nullherz_traits::ProcessorTypeId::NEURAL_NAM),
-                                "hypernetwork-eq" => Some(nullherz_traits::ProcessorTypeId::HYPERNETWORK_EQ),
-                                "tube-preamp" => Some(nullherz_traits::ProcessorTypeId::TUBE_PREAMP),
-                                "multiband-compressor" => Some(nullherz_traits::ProcessorTypeId::MULTIBAND_COMPRESSOR),
-                                "transient-shaper" => Some(nullherz_traits::ProcessorTypeId::TRANSIENT_SHAPER),
-                                "tape-saturator" => Some(nullherz_traits::ProcessorTypeId::TAPE_SATURATOR),
-                                "mutator" => Some(nullherz_traits::ProcessorTypeId::MUTATOR),
-                                "algorithmic-reverb" => Some(nullherz_traits::ProcessorTypeId::REVERB),
-                                "algorithmic-modulation" => Some(nullherz_traits::ProcessorTypeId::MODULATION_FX),
-                                "algorithmic-delay" => Some(nullherz_traits::ProcessorTypeId::DELAY),
-                                "algorithmic-eq" => Some(nullherz_traits::ProcessorTypeId::BIQUAD),
-                                _ => None,
-                            };
-
-                            if let Some(type_id) = p_type_id {
-                                let _ = app.command_sender.send(nullherz_traits::Command::Topology(
-                                    nullherz_traits::TopologyCommand::SwapProcessor {
-                                        node_idx,
-                                        processor_type_id: type_id,
-                                    }
-                                ));
-                            } else {
-                                let mut name_bytes = [0u8; 32];
-                                let b = descriptor.id.as_bytes();
-                                let len = b.len().min(32);
-                                name_bytes[..len].copy_from_slice(&b[..len]);
-
-                                let _ = app.command_sender.send(nullherz_traits::Command::Core(
-                                    nullherz_traits::CoreCommand::HotLoadSidecar {
-                                        name: name_bytes,
-                                        node_idx,
-                                    }
-                                ));
+                        // Four slots per deck, and no more: the rack is bounded by the
+                        // graph. A disabled button is the honest way to say "full" —
+                        // the old unbounded list accepted the click and overwrote
+                        // whatever was already in slot 1.
+                        let rack_full = app.decks.deck_fx[i % crate::fx_rack::DECK_COUNT]
+                            .iter()
+                            .all(|s| s.is_some());
+                        let deck_btn = ui.add_enabled(
+                            !rack_full,
+                            egui::Button::new(
+                                RichText::new(format!("DECK {}", deck_char))
+                                    .size(theme.type_caption)
+                                    .color(deck_color),
+                            ),
+                        ).on_hover_text(if rack_full {
+                            format!(
+                                "Deck {} rack is full ({} slots) — remove an insert first",
+                                deck_char,
+                                crate::fx_rack::DECK_FX_SLOT_COUNT
+                            )
+                        } else {
+                            format!("Hot-load {} onto Deck {}", descriptor.name, deck_char)
+                        });
+                        if deck_btn.clicked() {
+                            // One call: picks the deck's first free slot, resolves that slot's
+                            // node by name, and sends the swap (or the sidecar hot-load) only if
+                            // it resolves.
+                            //
+                            // What used to be here appended a label to an unbounded list, looked
+                            // up `deck_<x>_fx<len+1>`, fell back to the `deck_<x>_insert` alias,
+                            // and finally to `.unwrap_or(i as u32 * 4 + 2)` — a hardcoded node
+                            // index in a view, which `AGENTS.md` §3 forbids. Because the rack was
+                            // seeded with three non-node labels, the FIRST load already took the
+                            // alias path, and every load after it resolved the same node and
+                            // replaced its predecessor.
+                            match app.fx_rack_load_sidecar(i, &descriptor.name, &descriptor.id) {
+                                crate::fx_rack::LoadOutcome::Loaded(slot) => {
+                                    println!("Store: loaded {} into deck {} FX slot {}", descriptor.name, deck_char, slot + 1);
+                                }
+                                // The button is disabled when the rack is full, so these two are
+                                // the paths a disabled button cannot cover. Reported rather than
+                                // swallowed: a load that did not happen must not look like one
+                                // that did.
+                                crate::fx_rack::LoadOutcome::RackFull => {
+                                    println!("Store: deck {} FX rack is full ({} slots) — {} not loaded",
+                                        deck_char, crate::fx_rack::DECK_FX_SLOT_COUNT, descriptor.name);
+                                }
+                                crate::fx_rack::LoadOutcome::Unresolved => {
+                                    println!("Store: deck {} has no FX slot node in the running graph — {} not loaded",
+                                        deck_char, descriptor.name);
+                                }
                             }
                         }
                     }
