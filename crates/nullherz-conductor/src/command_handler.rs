@@ -560,10 +560,68 @@ impl CommandHandler {
                         }
                     }
                 }
-                conductor.topology_manager.current_sample_rate = sample_rate;
-                conductor.mixer_bridge.timeline.sample_rate = sample_rate;
-                conductor.transfusion_manager.set_device_sample_rate(sample_rate as u32);
                 conductor.period_size = block_size as u64;
+
+                // Make the DEVICE re-negotiate, or this command is a lie.
+                //
+                // `set_config` above only changes what the engine BELIEVES and
+                // what the next `start()` will ask the device for. The running
+                // device keeps clocking at the rate it opened with, because
+                // nothing here used to reopen it: `switch_backend`'s only other
+                // caller is the output-device selector, and `start_backend` runs
+                // once at startup. So picking 48 kHz on a device running at
+                // 44.1 kHz left the engine rendering for 48 kHz into hardware
+                // consuming 44,100 frames a second, and EVERY track played at
+                // 44100/48000 = 0.919x — about 1.5 semitones flat. Lowering the
+                // rate pitched everything up by the same ratio.
+                //
+                // `sync_session_rate()` could not catch it either: it reads the
+                // ENGINE's target rate, so it propagated the new belief rather
+                // than detecting the disagreement with the hardware.
+                //
+                // This blocks the command path for the teardown plus
+                // `switch_backend`'s settle delay, which AGENTS.md §1 otherwise
+                // forbids. It is allowed here for the same reason the
+                // output-device selector does it inline: reconfiguring the
+                // device inherently stops the audio thread, the backend is owned
+                // by this conductor so no other thread can restart it, and it is
+                // a one-shot user action rather than recurring work.
+                if let Some(active) = conductor.engine_coordinator.backend_manager.active_type {
+                    if let Err(e) = conductor.switch_backend(active) {
+                        // `switch_backend` stops the old device before starting
+                        // the new one, so a failure here leaves NO device
+                        // running, not the previous one. Say that, because the
+                        // two have opposite symptoms: silence, not wrong pitch.
+                        eprintln!(
+                            "CommandHandler: ConfigureAudioEngine could not reopen the {:?} backend at {} Hz ({}). \
+                             The previous device was already stopped, so there is no audio output until a \
+                             backend is started again.",
+                            active, sample_rate, e
+                        );
+                    }
+                }
+
+                // The DEVICE's answer wins, not the request. `*_near` means ALSA
+                // may hand back 48 kHz for a 96 kHz request, and stamping the
+                // request here would reintroduce exactly the disagreement above.
+                // The backend publishes what it negotiated through `set_config`
+                // from its audio thread, so this reads back rather than assumes;
+                // `sync_session_rate()` adopts it again on the next tick if the
+                // answer lands after this point.
+                let effective_rate = {
+                    let lock = conductor.engine_coordinator.backend_manager.engine_handle.lock();
+                    lock.as_ref().map(|e| e.target_sample_rate()).unwrap_or(sample_rate)
+                };
+                let effective_rate = if effective_rate > 0.0 { effective_rate } else { sample_rate };
+                if effective_rate != sample_rate {
+                    println!(
+                        "CommandHandler: device negotiated {} Hz for a {} Hz request; session follows the device.",
+                        effective_rate, sample_rate
+                    );
+                }
+                conductor.topology_manager.current_sample_rate = effective_rate;
+                conductor.mixer_bridge.timeline.sample_rate = effective_rate;
+                conductor.transfusion_manager.set_device_sample_rate(effective_rate as u32);
                 let _ = conductor.update_system_config(None, None, None, None, None);
                 true
             }
