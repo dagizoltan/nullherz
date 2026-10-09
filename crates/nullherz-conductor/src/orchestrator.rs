@@ -105,15 +105,32 @@ pub struct Conductor {
     pub last_genetic_evolve_secs: u64,
     last_metadata_sync_secs: u64,
     last_registry_reap_secs: u64,
-    /// Audio device names, refreshed on a slow timer rather than per frame.
+    /// Audio device names, published by the background scanner. Never computed
+    /// on the tick.
     ///
-    /// `enumerate_devices()` is a real driver query: dlopen + ~18 dlsym +
-    /// `snd_device_name_hint`, which parses ALSA's config to build the list.
-    /// Measured at 74.6 ms on the reference machine. Telemetry runs ~187 times
-    /// a second, so calling it there costs ~14 SECONDS of work per second of
-    /// audio and the conductor can never drain its telemetry queue — decks stop
-    /// responding to load and play entirely. The device list changes when
-    /// hardware is plugged in, not 187 times a second.
+    /// `enumerate_devices()` is a real driver query: `snd_device_name_hint`
+    /// parses ALSA's whole config tree from disk to build the list, and it does
+    /// that on EVERY call — measured at 15.0 ms here, 74.6 ms on a machine with
+    /// more cards. (The dlopen + ~40 dlsym around it is not the cost: ~16 µs
+    /// warm. It is cached anyway, in `nullherz_backends::alsa::ALSA_LIB`.)
+    ///
+    /// Two separate limits, and both have been hit:
+    ///
+    ///  - Telemetry runs ~187 times a second. Calling it there cost ~14 SECONDS
+    ///    of work per second of audio and the conductor could never drain its
+    ///    telemetry queue — decks stopped responding to load and play.
+    ///  - The 5-SECONDLY refresh was still synchronous on `tick()`, which is
+    ///    the thread that feeds the RT command ring. One 15 ms scan every five
+    ///    seconds is a ~3x audio-block overrun that delays every command queued
+    ///    behind it, `Play` included, and starves telemetry for that tick. That
+    ///    is `test_long_track_does_not_stall_the_control_path` failing at 10.8
+    ///    ms against a 5.8 ms budget.
+    ///
+    /// So the timer is still here — the device list changes when hardware is
+    /// plugged in, not 187 times a second — but the scan itself runs on a
+    /// background thread and arrives through [`Conductor::device_scan_rx`].
+    /// Seeded with `default`, which always resolves, so the device list is
+    /// never empty for the UI while the first scan is still running.
     cached_audio_devices: Vec<String>,
     /// Resident sample count and bytes, refreshed on a slow timer.
     ///
@@ -123,7 +140,25 @@ pub struct Conductor {
     /// second to render a number nobody watches change that fast.
     cached_residency: (u32, u64),
     last_residency_scan: Option<std::time::Instant>,
+    /// When the last background device scan was STARTED (not finished).
     last_device_scan: Option<std::time::Instant>,
+    /// Device lists from the background scanner. Same shape as the async track
+    /// hydration channel below, for the same reason: the work is unbounded
+    /// foreign-library time and the tick must not wait on it.
+    device_scan_tx: std::sync::mpsc::Sender<Vec<String>>,
+    device_scan_rx: std::sync::mpsc::Receiver<Vec<String>>,
+    /// Set while a scan thread is alive, so a tick cannot pile up a second
+    /// scan behind one that is still walking the config tree. Cleared by the
+    /// scan thread on the way out, including on unwind.
+    device_scan_in_flight: Arc<std::sync::atomic::AtomicBool>,
+    /// How many background device scans have been STARTED this session.
+    ///
+    /// This is what makes "the rescan is rate-limited" an assertable fact
+    /// rather than a timing measurement: the scan no longer happens on the
+    /// caller's thread, so there is otherwise nothing for a test to observe
+    /// except wall clock, which is profile-dependent. See
+    /// `tests/telemetry_hot_path_test.rs`.
+    device_scans_started: u64,
     pub focused_node_idx: Option<u32>,
     pub active_transitions: Vec<DnaTransition>,
     pub undo_stack: Vec<(
@@ -263,6 +298,36 @@ where
     }
 }
 
+/// Enumerate playback devices. Runs on the background scan thread only.
+///
+/// Asks a FRESH backend of the active kind rather than the running instance:
+/// `AudioBackend` is `Send` but the live one is owned by the conductor, and
+/// every backend's `enumerate_devices` is a stateless driver query that reads
+/// nothing `start()` set — ALSA and CoreAudio ask the driver, PipeWire, JACK
+/// and Mock answer from constants, and Threaded delegates to ALSA. Constructing
+/// one is a few atomics; it opens no device.
+fn scan_audio_devices(active: Option<nullherz_traits::AudioBackendType>) -> Vec<String> {
+    let mut devs = Vec::new();
+    if let Some(ty) = active {
+        devs = nullherz_backends::BackendFactory::create(ty).enumerate_devices();
+    }
+
+    if devs.is_empty() {
+        #[cfg(target_os = "linux")]
+        {
+            devs = nullherz_backends::AlsaBackend::new().enumerate_devices();
+        }
+        #[cfg(target_os = "macos")]
+        {
+            devs = nullherz_backends::CoreAudioBackend::new().enumerate_devices();
+        }
+        if devs.is_empty() {
+            devs = vec!["default".to_string()];
+        }
+    }
+    devs
+}
+
 impl Conductor {
     pub fn new() -> Self {
         let db_path = if std::path::Path::new("storage/db/library.redb").exists() {
@@ -286,6 +351,7 @@ impl Conductor {
         transfusion_manager = transfusion_manager.with_library(library.clone());
 
         let (hydration_done_tx, hydration_done_rx) = std::sync::mpsc::channel();
+        let (device_scan_tx, device_scan_rx) = std::sync::mpsc::channel();
 
         let stem_worker = Arc::new(crate::stem_worker::StemExtractionWorker::new(sample_registry.clone(), library.clone()));
         stem_worker.start();
@@ -340,10 +406,14 @@ impl Conductor {
             analysed_ids: analysis_worker_handle,
             analysis_requests,
             midi_shm_name: next_midi_bridge_shm_name(),
-            cached_audio_devices: Vec::new(),
+            cached_audio_devices: vec!["default".to_string()],
             cached_residency: (0, 0),
             last_residency_scan: None,
             last_device_scan: None,
+            device_scan_tx,
+            device_scan_rx,
+            device_scan_in_flight: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            device_scans_started: 0,
             focused_node_idx: None,
             active_transitions: Vec::new(),
             undo_stack: Vec::new(),
@@ -1333,35 +1403,68 @@ impl Conductor {
         }
     }
 
-    /// Re-scan audio devices at most every few seconds. See
-    /// [`Conductor::cached_audio_devices`] for why this must never run per frame.
+    /// Publish any finished device scan and start a new one if the timer is up.
+    ///
+    /// Both halves are O(1) on the tick: the scan itself — tens of
+    /// milliseconds of foreign-library work, see
+    /// [`Conductor::cached_audio_devices`] — happens on a background thread.
+    /// This is the same shape as the async track hydration below, and it is
+    /// here for the same reason AGENTS.md §1 gives: the tick feeds the RT
+    /// command ring, so a command queued behind it waits however long the
+    /// inline work took.
     fn refresh_audio_devices(&mut self) {
         const RESCAN: std::time::Duration = std::time::Duration::from_secs(5);
-        let due = self.cached_audio_devices.is_empty()
-            || self.last_device_scan.map(|t| t.elapsed() >= RESCAN).unwrap_or(true);
+
+        // Only the newest list means anything; a backlog can only happen if a
+        // scan outlived its successor's start, and then the later answer wins.
+        if let Some(devs) = self.device_scan_rx.try_iter().last() {
+            self.cached_audio_devices = devs;
+        }
+
+        let due = self.last_device_scan.map(|t| t.elapsed() >= RESCAN).unwrap_or(true);
         if !due { return; }
+
+        // Order matters: a scan still running means NOT taking the slot and
+        // NOT stamping the timer, so the next tick retries rather than
+        // skipping this rescan. That is what makes `start_backend`'s
+        // `last_device_scan = None` reliably produce a scan of the new
+        // backend even if the old one's scan was still in flight.
+        if self
+            .device_scan_in_flight
+            .swap(true, std::sync::atomic::Ordering::SeqCst)
+        {
+            return;
+        }
         self.last_device_scan = Some(std::time::Instant::now());
+        self.device_scans_started += 1;
 
-        let mut devs = Vec::new();
-        if let Some(ref backend) = self.engine_coordinator.backend_manager.backend {
-            devs = backend.enumerate_devices();
+        let active = self.engine_coordinator.backend_manager.active_type;
+        let tx = self.device_scan_tx.clone();
+        let in_flight = self.device_scan_in_flight.clone();
+        let spawned = std::thread::Builder::new()
+            .name("device-scan".to_string())
+            .spawn(move || {
+                // Clear the slot on the way out whatever happens. A scan that
+                // panicked inside libasound and left this set would wedge
+                // enumeration for the life of the process.
+                struct Slot(Arc<std::sync::atomic::AtomicBool>);
+                impl Drop for Slot {
+                    fn drop(&mut self) {
+                        self.0.store(false, std::sync::atomic::Ordering::SeqCst);
+                    }
+                }
+                let _slot = Slot(in_flight);
+                // Receiver gone means the conductor is shutting down.
+                let _ = tx.send(scan_audio_devices(active));
+            });
+        if let Err(e) = spawned {
+            // No thread. Keep the list we have (seeded `default`, so it is
+            // never empty) and let the next tick retry — the one thing not to
+            // do is fall back to scanning inline, which is the defect.
+            eprintln!("Conductor: device scan thread failed ({e}); keeping the previous device list.");
+            self.device_scan_in_flight
+                .store(false, std::sync::atomic::Ordering::SeqCst);
         }
-
-        if devs.is_empty() {
-            #[cfg(target_os = "linux")]
-            {
-                devs = nullherz_backends::AlsaBackend::new().enumerate_devices();
-            }
-            #[cfg(target_os = "macos")]
-            {
-                devs = nullherz_backends::CoreAudioBackend::new().enumerate_devices();
-            }
-            if devs.is_empty() {
-                devs = vec!["default".to_string()];
-            }
-        }
-
-        self.cached_audio_devices = devs;
     }
 
     /// Re-measure resident decoded audio at most twice a second.
@@ -1386,6 +1489,11 @@ impl Conductor {
 
     /// Device names for telemetry, from the cache.
     pub fn audio_device_names(&self) -> &[String] { &self.cached_audio_devices }
+
+    /// Background device scans started this session. Exposed so a test can
+    /// assert the rescan is rate-limited without timing anything — see the
+    /// field's note.
+    pub fn device_scans_started(&self) -> u64 { self.device_scans_started }
 
     /// Adopt the rate the audio device actually negotiated.
     ///

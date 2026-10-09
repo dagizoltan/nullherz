@@ -25,6 +25,15 @@
 //!
 //! These assertions are against the AUDIO BLOCK BUDGET with wide headroom, so
 //! a loaded CI box cannot flake them, but the 46x regression cannot return.
+//!
+//! The budget then caught a SECOND, unrelated stall with the same symptom, so
+//! read a failure here as "something in `tick()` blocks", not specifically as
+//! the library read coming back: `Conductor::refresh_audio_devices` enumerated
+//! audio devices inline every five seconds, and `snd_device_name_hint` walks
+//! ALSA's config tree from disk on every call — 15 ms here, 74.6 ms on a
+//! machine with more cards. One tick in every ~860 cost 10.8 ms against this
+//! 5.8 ms budget. The scan now runs on a background thread and publishes
+//! through a channel, like track hydration.
 
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -223,12 +232,17 @@ fn test_long_track_does_not_stall_the_control_path() {
         long.worst_telemetry, budget
     );
 
-    // tick() takes the engine_handle lock that the backend needs to render
-    // every block, so a slow tick is a hard audio dropout. 130 ms before.
+    // tick() is the thread that drains the command queue into the RT ring and
+    // collects telemetry, so its cost is latency every command pays. 130 ms
+    // before the metadata-sync fix; 10.8 ms again later, when the 5-secondly
+    // audio-device rescan was still enumerating inline (`snd_device_name_hint`
+    // walks ALSA's config tree from disk on every call).
     assert!(
         long.worst_tick < budget,
-        "tick() took {:?}, over the {:?} audio-block budget — something slow is holding \
-         the engine lock (the metadata sync used to read the library under it)",
+        "tick() took {:?}, over the {:?} audio-block budget — every command queued behind \
+         this tick, Play included, is delayed by that long, and telemetry goes that long \
+         uncollected. Something in tick() is doing blocking work inline (AGENTS.md §1: \
+         decode, disk I/O and driver enumeration belong on a background thread)",
         long.worst_tick, budget
     );
 }
