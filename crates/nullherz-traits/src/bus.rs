@@ -126,8 +126,32 @@ pub struct RegisteredSample {
     pub metadata: Arc<SampleMetadata>,
 }
 
+/// What a registry currently holds. See [`SampleRegistry::residency`].
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Residency {
+    /// Samples currently registered.
+    pub count: u32,
+    /// Decoded audio held by those samples, in bytes.
+    pub bytes: u64,
+}
+
 pub trait SampleRegistry: Send + Sync {
     fn get(&self, id: u64) -> Option<RegisteredSample>;
+
+    /// Resident sample count and decoded audio bytes, in O(1).
+    ///
+    /// Deliberately NOT defaulted, for the same reason as `remove` below: a
+    /// default returning zero would read as "nothing is resident" from an
+    /// implementor that simply does not track it, and residency is what the
+    /// caller uses to decide whether to evict.
+    ///
+    /// O(1) is part of the contract, not an implementation note. The conductor
+    /// reads this twice a second from `tick()` — the thread that feeds the RT
+    /// command ring — and it used to compute it by walking every registered
+    /// sample and cloning each one: 678 µs at 16k samples, unbounded in library
+    /// size, on a thread with a 5.8 ms budget. Implement it by accounting on
+    /// register/remove, never by walking.
+    fn residency(&self) -> Residency;
     fn register(&self, id: u64, buffer: SampleBuffer);
     fn register_with_metadata(&self, id: u64, buffer: SampleBuffer, metadata: Arc<SampleMetadata>);
     fn drain_garbage(&self);

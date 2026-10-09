@@ -132,14 +132,24 @@ pub struct Conductor {
     /// Seeded with `default`, which always resolves, so the device list is
     /// never empty for the UI while the first scan is still running.
     cached_audio_devices: Vec<String>,
-    /// Resident sample count and bytes, refreshed on a slow timer.
+    /// Resident sample count and bytes, read from the registry in O(1).
     ///
-    /// Same reasoning as [`Conductor::cached_audio_devices`]: computing this
-    /// walks every registered sample, and telemetry runs ~187 times a second.
-    /// With a real library that is tens of thousands of refcount operations per
-    /// second to render a number nobody watches change that fast.
+    /// This used to be computed by walking every registered sample and cloning
+    /// each one — `list_ids()` plus a `get()` per id. Measured by
+    /// `bench_registry_scale`, that walk is linear in library size: 3.4 µs at
+    /// 100 samples, 130 µs at 4k, 678 µs at 16k, with no upper bound. It ran
+    /// twice a second on `tick()`, the thread that feeds the RT command ring.
+    ///
+    /// It was also self-defeating. Every `get()` holds the registry's reader
+    /// count up, and `drain_garbage` declines to reclaim while any reader is
+    /// active — so the walk deferred reclamation of the retired maps that
+    /// registration produces, each holding an `Arc` clone of every sample in
+    /// it. The residency measurement was keeping residency high.
+    ///
+    /// The registry now accounts for this on register/remove, so reading it is
+    /// two relaxed atomic loads and the timer that used to rate-limit the walk
+    /// is gone with it.
     cached_residency: (u32, u64),
-    last_residency_scan: Option<std::time::Instant>,
     /// When the last background device scan was STARTED (not finished).
     last_device_scan: Option<std::time::Instant>,
     /// Device lists from the background scanner. Same shape as the async track
@@ -408,7 +418,6 @@ impl Conductor {
             midi_shm_name: next_midi_bridge_shm_name(),
             cached_audio_devices: vec!["default".to_string()],
             cached_residency: (0, 0),
-            last_residency_scan: None,
             last_device_scan: None,
             device_scan_tx,
             device_scan_rx,
@@ -1469,19 +1478,8 @@ impl Conductor {
 
     /// Re-measure resident decoded audio at most twice a second.
     fn refresh_residency(&mut self) {
-        const RESCAN: std::time::Duration = std::time::Duration::from_millis(500);
-        let due = self.last_residency_scan.map(|t| t.elapsed() >= RESCAN).unwrap_or(true);
-        if !due { return; }
-        self.last_residency_scan = Some(std::time::Instant::now());
-        let reg = &self.transfusion_manager.sample_registry;
-        let ids = reg.list_ids();
-        let mut bytes = 0u64;
-        for id in &ids {
-            if let Some(s) = reg.get(*id) {
-                bytes += (s.buffer.len() * std::mem::size_of::<f32>()) as u64;
-            }
-        }
-        self.cached_residency = (ids.len() as u32, bytes);
+        let r = self.transfusion_manager.sample_registry.residency();
+        self.cached_residency = (r.count, r.bytes);
     }
 
     /// Resident sample count and audio bytes, from the cache.
