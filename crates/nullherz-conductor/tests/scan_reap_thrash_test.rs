@@ -53,6 +53,7 @@ impl nullherz_traits::SampleRegistry for CountingRegistry {
         self.inner.register_with_metadata(id, buffer, metadata);
     }
     fn drain_garbage(&self) { self.inner.drain_garbage() }
+    fn residency(&self) -> nullherz_traits::Residency { self.inner.residency() }
     fn list_ids(&self) -> Vec<u64> { self.inner.list_ids() }
     fn remove(&self, id: u64) -> Option<nullherz_traits::RegisteredSample> { self.inner.remove(id) }
 }
