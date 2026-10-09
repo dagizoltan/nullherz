@@ -27,7 +27,7 @@ pub fn render_midi(app: &mut InspectorApp, ui: &mut Ui) {
                 if app.settings.auto_midi_discovery {
                     Frame::none()
                         .fill(theme.success.linear_multiply(0.12))
-                        .stroke(Stroke::new(1.0, theme.success))
+                        .stroke(Stroke::new(1.0_f32, theme.success))
                         .rounding(Rounding::same(theme.radius_sm))
                         .inner_margin(Margin::symmetric(6.0, 2.0))
                         .show(ui, |ui| {
@@ -36,7 +36,7 @@ pub fn render_midi(app: &mut InspectorApp, ui: &mut Ui) {
                 } else {
                     Frame::none()
                         .fill(theme.warning.linear_multiply(0.12))
-                        .stroke(Stroke::new(1.0, theme.warning))
+                        .stroke(Stroke::new(1.0_f32, theme.warning))
                         .rounding(Rounding::same(theme.radius_sm))
                         .inner_margin(Margin::symmetric(6.0, 2.0))
                         .show(ui, |ui| {
@@ -74,7 +74,7 @@ pub fn render_midi(app: &mut InspectorApp, ui: &mut Ui) {
                     Frame::none()
                         .fill(theme.bg_inset)
                         .rounding(theme.radius_sm)
-                        .stroke(Stroke::new(1.0, theme.border))
+                        .stroke(Stroke::new(1.0_f32, theme.border))
                         .inner_margin(Margin::symmetric(theme.space_sm, theme.space_xs))
                         .show(ui, |ui| {
                             ui.horizontal(|ui| {
@@ -146,7 +146,7 @@ pub fn render_midi(app: &mut InspectorApp, ui: &mut Ui) {
                     let mut btn = Button::new(RichText::new(label).size(10.0).strong());
                     if is_active {
                         btn = btn.fill(theme.accent.linear_multiply(0.18))
-                                 .stroke(Stroke::new(1.0, theme.accent));
+                                 .stroke(Stroke::new(1.0_f32, theme.accent));
                     } else {
                         btn = btn.fill(theme.bg_inset);
                     }
@@ -294,7 +294,7 @@ pub fn render_midi(app: &mut InspectorApp, ui: &mut Ui) {
                     Frame::none()
                         .fill(bg)
                         .rounding(theme.radius_sm)
-                        .stroke(Stroke::new(1.0, if is_held { theme.accent } else { theme.border }))
+                        .stroke(Stroke::new(1.0_f32, if is_held { theme.accent } else { theme.border }))
                         .inner_margin(Margin::symmetric(8.0, 6.0))
                         .show(ui, |ui| {
                             ui.vertical_centered(|ui| {
@@ -341,7 +341,7 @@ pub fn render_midi(app: &mut InspectorApp, ui: &mut Ui) {
                     Frame::none()
                         .fill(bg)
                         .rounding(theme.radius_sm)
-                        .stroke(Stroke::new(1.0, if is_held { theme.accent } else { theme.border }))
+                        .stroke(Stroke::new(1.0_f32, if is_held { theme.accent } else { theme.border }))
                         .inner_margin(Margin::symmetric(8.0, 6.0))
                         .show(ui, |ui| {
                             ui.vertical_centered(|ui| {
@@ -396,7 +396,7 @@ pub fn render_midi(app: &mut InspectorApp, ui: &mut Ui) {
                             ui.horizontal(|ui| {
                                 Frame::none()
                                     .fill(pill_bg)
-                                    .stroke(Stroke::new(1.0, pill_fg))
+                                    .stroke(Stroke::new(1.0_f32, pill_fg))
                                     .rounding(Rounding::same(theme.radius_sm))
                                     .inner_margin(Margin::symmetric(4.0, 1.0))
                                     .show(ui, |ui| {

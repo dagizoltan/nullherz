@@ -608,7 +608,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                             let x = auto_rect.left() + (s as f32 * slot_w) + (s as f32 * 2.0);
                                             ui.painter().line_segment(
                                                 [Pos2::new(x, auto_rect.top()), Pos2::new(x, auto_rect.bottom())],
-                                                Stroke::new(1.0, app.theme.border_stroke.color.linear_multiply(0.5)),
+                                                Stroke::new(1.0_f32, app.theme.border_stroke.color.linear_multiply(0.5)),
                                             );
                                         }
                                     }
@@ -624,7 +624,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                             }).collect();
 
                                             for w in pts.windows(2) {
-                                                ui.painter().line_segment([w[0], w[1]], Stroke::new(1.5, track_color));
+                                                ui.painter().line_segment([w[0], w[1]], Stroke::new(1.5_f32, track_color));
                                             }
                                             for p in &pts {
                                                 ui.painter().circle_filled(*p, 3.0, track_color);

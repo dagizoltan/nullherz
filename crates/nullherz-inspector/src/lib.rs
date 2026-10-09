@@ -1176,7 +1176,7 @@ impl InspectorApp {
                                     .fill(bg_fill)
                                     .rounding(egui::Rounding::same(3.0))
                                     .inner_margin(egui::Margin::symmetric(6.0, 2.0))
-                                    .stroke(egui::Stroke::new(1.0, color.linear_multiply(0.4)))
+                                    .stroke(egui::Stroke::new(1.0_f32, color.linear_multiply(0.4)))
                                     .show(ui, |ui| {
                                         ui.horizontal(|ui| {
                                             ui.spacing_mut().item_spacing.x = 3.0;
