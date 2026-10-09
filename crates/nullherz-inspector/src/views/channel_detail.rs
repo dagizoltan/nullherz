@@ -344,7 +344,7 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                             .size(10.0)
                                             .color(app.theme.text_disabled),
                                     )
-                                    .on_hover_text("Pad subchannel inserts have no graph node yet (debt §1.7)");
+                                    .on_hover_text("Pad subchannel inserts have no graph node yet (debt §3.1)");
                                 }
                                 return;
                             }

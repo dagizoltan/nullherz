@@ -389,7 +389,7 @@ fn render_channel_fx_slot(
 /// Until then the remove and reorder buttons are DISABLED rather than left
 /// looking live, because a `✕` that drops a label and leaves a processor
 /// running is worse than no `✕`. Tracked in
-/// `docs/state/TECHNICAL_DEBT_AND_STUBS.md` §1.7.
+/// `docs/state/TECHNICAL_DEBT_AND_STUBS.md` §3.1.
 fn render_sampler_subchannel_fx_item(app: &mut InspectorApp, ui: &mut Ui, pad_idx: usize, fx_idx: usize, accent_color: Color32) {
     ui.push_id(("sampler_fx", pad_idx, fx_idx), |ui| {
         let theme = app.theme;
@@ -419,7 +419,7 @@ fn render_sampler_subchannel_fx_item(app: &mut InspectorApp, ui: &mut Ui, pad_id
                             .response
                             .on_hover_text(
                                 "Pad subchannel inserts are display-only — the pads have no \
-                                 per-pad audio path in the graph yet (debt §1.7)",
+                                 per-pad audio path in the graph yet (debt §3.1)",
                             );
                         });
                     });
