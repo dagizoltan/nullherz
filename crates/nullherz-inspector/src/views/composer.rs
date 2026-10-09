@@ -61,7 +61,12 @@ pub fn render_mini_waveform(
 }
 
 pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>) {
-    let seq_node = app.get_node_id("deck_a_sequencer").unwrap_or(70);
+    // `Option`, not a default. This was `.unwrap_or(70)`: AGENTS.md calls
+    // sequencer ids 70-73 LOGICAL sentinels that are safe because they sit
+    // above `MAX_NODES` — but `MAX_NODES` is 128, so 70 is a perfectly real
+    // graph node (the console allocates 71). A failed lookup did not drop the
+    // command, it aimed it at whatever node 70 happens to be.
+    let seq_node = app.get_node_id("deck_a_sequencer");
 
     ui.horizontal(|ui| {
         ui.label(RichText::new(format!("STUDIO DAW ENGINE: {} TRACKS", app.mixer.num_channels)).strong().size(app.theme.type_caption).color(app.theme.accent));
@@ -184,7 +189,9 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
 
         if ui.button(RichText::new("CLEAR").size(9.0).strong()).on_hover_text("Clear All Patterns").clicked() {
             for i in 0..16 {
-                 let _ = app.command_sender.send(Command::Performance(PerformanceCommand::ClearTrackPattern { node_idx: seq_node, track_idx: i as u32 }));
+                 if let Some(node_idx) = seq_node {
+                     let _ = app.command_sender.send(Command::Performance(PerformanceCommand::ClearTrackPattern { node_idx, track_idx: i as u32 }));
+                 }
                  app.composer.studio_sequencer_grid[i].fill(0.0);
                  for sub in 0..16 {
                      app.composer.subchannel_sequencer_grid[i][sub].fill(0.0);
@@ -389,7 +396,9 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                     if response.clicked() {
                                         let bar = (slot_idx / steps_per_bar) + 1;
                                         let beat_pos = (bar - 1) as f64 * 4.0;
-                                        let _ = app.command_sender.send(Command::Performance(PerformanceCommand::JumpByBeats { node_idx: seq_node, beats: beat_pos as f32 }));
+                                        if let Some(node_idx) = seq_node {
+                                            let _ = app.command_sender.send(Command::Performance(PerformanceCommand::JumpByBeats { node_idx, beats: beat_pos as f32 }));
+                                        }
                                     }
 
                                     if slot_idx % steps_per_bar == 0 {
@@ -496,12 +505,14 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                                 let current_vel = app.composer.studio_sequencer_grid[track_idx][slot_idx];
                                                 let new_vel = (current_vel - delta_y * 0.005).clamp(0.05, 1.0);
                                                 app.composer.studio_sequencer_grid[track_idx][slot_idx] = new_vel;
-                                                let _ = app.command_sender.send(Command::Performance(PerformanceCommand::SetSequencerStep {
-                                                    node_idx: seq_node,
-                                                    track: track_idx as u32,
-                                                    step: slot_idx as u32,
-                                                    value: new_vel,
-                                                }));
+                                                if let Some(node_idx) = seq_node {
+                                                    let _ = app.command_sender.send(Command::Performance(PerformanceCommand::SetSequencerStep {
+                                                        node_idx,
+                                                        track: track_idx as u32,
+                                                        step: slot_idx as u32,
+                                                        value: new_vel,
+                                                    }));
+                                                }
                                             }
                                         }
 
@@ -518,12 +529,14 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                             let is_on = app.composer.studio_sequencer_grid[track_idx][slot_idx] == 0.0;
                                             let val = if is_on { 1.0 } else { 0.0 };
                                             app.composer.studio_sequencer_grid[track_idx][slot_idx] = val;
-                                            let _ = app.command_sender.send(Command::Performance(PerformanceCommand::SetSequencerStep {
-                                                node_idx: seq_node,
-                                                track: track_idx as u32,
-                                                step: slot_idx as u32,
-                                                value: val,
-                                            }));
+                                            if let Some(node_idx) = seq_node {
+                                                let _ = app.command_sender.send(Command::Performance(PerformanceCommand::SetSequencerStep {
+                                                    node_idx,
+                                                    track: track_idx as u32,
+                                                    step: slot_idx as u32,
+                                                    value: val,
+                                                }));
+                                            }
                                         }
                                     }
                                 });
@@ -560,13 +573,16 @@ pub fn render(app: &mut InspectorApp, ui: &mut Ui, telemetry: &Option<Telemetry>
                                                     let val = if is_on { 1.0 } else { 0.0 };
                                                     app.composer.subchannel_sequencer_grid[track_idx][pad_i][slot_idx] = val;
 
-                                                    let target_node = app.get_node_id("drum_machine_node").unwrap_or(70);
-                                                    let _ = app.command_sender.send(Command::Performance(PerformanceCommand::SetSequencerStep {
-                                                        node_idx: target_node,
-                                                        track: pad_i as u32,
-                                                        step: slot_idx as u32,
-                                                        value: val,
-                                                    }));
+                                                    // Skip, do not default: `.unwrap_or(70)` aimed at a
+                                                    // real node when the lookup failed.
+                                                    if let Some(node_idx) = app.get_node_id("drum_machine_node") {
+                                                        let _ = app.command_sender.send(Command::Performance(PerformanceCommand::SetSequencerStep {
+                                                            node_idx,
+                                                            track: pad_i as u32,
+                                                            step: slot_idx as u32,
+                                                            value: val,
+                                                        }));
+                                                    }
                                                 }
                                             }
                                         });
@@ -793,13 +809,16 @@ pub fn render_clip_editor_drawer_panel(app: &mut InspectorApp, ui: &mut Ui) {
                                 let val = if is_on { 1.0 } else { 0.0 };
                                 app.composer.subchannel_sequencer_grid[selected_trk][pad_i][slot_idx] = val;
 
-                                let target_node = app.get_node_id("drum_machine_node").unwrap_or(70);
-                                let _ = app.command_sender.send(Command::Performance(PerformanceCommand::SetSequencerStep {
-                                    node_idx: target_node,
-                                    track: pad_i as u32,
-                                    step: slot_idx as u32,
-                                    value: val,
-                                }));
+                                // Skip, do not default: `.unwrap_or(70)` aimed at a real
+                                // node when the lookup failed.
+                                if let Some(node_idx) = app.get_node_id("drum_machine_node") {
+                                    let _ = app.command_sender.send(Command::Performance(PerformanceCommand::SetSequencerStep {
+                                        node_idx,
+                                        track: pad_i as u32,
+                                        step: slot_idx as u32,
+                                        value: val,
+                                    }));
+                                }
                             }
                         }
                     });
