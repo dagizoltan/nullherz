@@ -97,16 +97,19 @@ fn test_removing_returns_the_bytes() {
     }
     assert_eq!(reg.residency().bytes, 10 * 32 * 4);
 
-    reg.remove(3);
-    reg.remove(4);
+    // `remove` is `#[must_use]` because the evicted sample is freed wherever
+    // the caller drops it, and that must never be the audio thread. A test
+    // thread is a fine place, so bind and drop deliberately.
+    drop(reg.remove(3));
+    drop(reg.remove(4));
     assert_eq!(reg.residency().count, 8);
     assert_eq!(reg.residency().bytes, 8 * 32 * 4);
     assert_agrees(&reg, "two removals");
 
     // Removing an id that is not there must not move anything: `reap_registry`
     // sweeps ids speculatively, so the miss is the common case.
-    reg.remove(3);
-    reg.remove(9_999);
+    drop(reg.remove(3));
+    drop(reg.remove(9_999));
     assert_eq!(reg.residency().count, 8, "a missing id was counted as an eviction");
     assert_eq!(reg.residency().bytes, 8 * 32 * 4);
     assert_agrees(&reg, "removing absent ids");
@@ -122,7 +125,7 @@ fn test_accounting_survives_a_mixed_workload() {
             reg.register_with_metadata(id, buffer(16 + (id as usize % 7) * 8), meta());
         }
         for id in (round % 4..40).step_by(5) {
-            reg.remove(id);
+            drop(reg.remove(id));
         }
         for id in 0..12u64 {
             reg.register_with_metadata(id, buffer(64), meta());
