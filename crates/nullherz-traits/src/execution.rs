@@ -154,11 +154,30 @@ const _: () = assert!(MAX_BUFFERS + MAX_CROSSFADE_BUFFERS <= 255);
 ///
 /// Overflow is a SILENT DROP — `apply_mutation` is guarded by
 /// `if self.pending_mutation_count < MAX_MUTATIONS`, so a graph that needs more
-/// than this arrives partially built with no error. The 4-deck bootstrap already
-/// issues roughly that many AddNode/Connect mutations, so 64 was on the edge
-/// before the node-space increase and would be over it once processors are
-/// decomposed for tap points.
-pub const MAX_MUTATIONS: usize = 256;
+/// than this arrives partially built with no error.
+///
+/// The bound is NOT the node count. Every node also needs one mutation per
+/// input edge and one per output edge, and the console's strips are stereo end
+/// to end, so edges outnumber nodes roughly three to one: the 4-deck bootstrap
+/// issues 245 topology commands for 59 nodes, and each command lowers to
+/// exactly one mutation (`TopologyManager::handle_topology_command`).
+///
+/// 256 therefore left ELEVEN mutations of margin, and the invariant meant to
+/// guard this compared against `MAX_NODES` alone (256 >= 128, green) — so the
+/// margin was invisible. Crossing it is not a graceful degradation: the whole
+/// bootstrap is pushed before the engine runs its first block, so nothing
+/// drains the ring while it fills, and `push_mutation` spins out its
+/// one-second backpressure window and then DROPS structural mutations. The
+/// console comes up with a hole in it — no error, just a deck that loads a
+/// track and never becomes audible.
+///
+/// 1024 covers a rebuild of a MAXED graph: `MAX_NODES` AddNode mutations plus
+/// edges for all `MAX_BUFFERS` (128 + ~480 at the console's ratio ≈ 610), with
+/// room for the per-node decomposition that tap points will need.
+/// `test_node_space_and_mutation_budget_cover_a_full_rebuild` holds the
+/// invariant, and `nullherz-mixer`'s `test_bootstrap_fits_the_mutation_budget`
+/// checks the real console against it.
+pub const MAX_MUTATIONS: usize = 1024;
 pub const DEFAULT_WORKER_COUNT: usize = 4;
 pub const MAX_COMMANDS_PER_BLOCK: usize = 256;
 

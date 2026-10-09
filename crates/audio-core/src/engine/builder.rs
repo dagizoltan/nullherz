@@ -38,7 +38,16 @@ impl Default for EngineBuilder<StandardKernel> {
             command_buffer_size: 1024,
             midi_buffer_size: 256,
             bundle_buffer_size: 64,
-            topology_buffer_size: 256,
+            // Sized from `MAX_MUTATIONS`, because the two bound the same thing:
+            // how much of a graph can be in flight at once. The whole bootstrap
+            // is pushed before the engine runs its first block, so NOTHING
+            // drains this ring while it fills — a bootstrap larger than the
+            // ring makes `push_mutation` spin out its one-second backpressure
+            // window and then DROP structural mutations, and the console comes
+            // up with a hole in it. At 256 the 4-deck console sat eleven
+            // mutations under that edge (it issues 245), which is not margin
+            // — it is luck.
+            topology_buffer_size: nullherz_traits::MAX_MUTATIONS,
             telemetry_buffer_size: 1024,
             garbage_buffer_size: 1024,
             initial_graph: None,
