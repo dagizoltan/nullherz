@@ -202,3 +202,96 @@ fn test_unknown_source_rate_does_not_transpose() {
         "an unknown source rate must not scale playback"
     );
 }
+
+/// Changing the device rate while a voice is PLAYING must re-derive the
+/// conversion.
+///
+/// `source_rate_ratio` is computed at trigger time and stored on the voice
+/// (`trigger_slice`, the `PlayNode` arm, and the MIDI note-on arm are the only
+/// three writers). Nothing refreshed it afterwards, and `SamplerProcessor` has
+/// no `setup()` override, so the engine's post-`set_config` setup pass could not
+/// refresh it either.
+///
+/// So switching the device from 44.1 kHz to 48 kHz while a 48 kHz track was
+/// playing left the voice still converting for the OLD device rate: it kept
+/// consuming 1.088 frames of source per output frame where it should now
+/// consume exactly 1.0. The track pitched up ~1.5 semitones and stayed there
+/// until it was retriggered — which is what an operator sees as "changing the
+/// sample rate pitches the tracks that don't match it".
+///
+/// Note the asymmetry this test pins: `source_samples_per_beat` already reads
+/// the LIVE `transport.sample_rate` every block, so beat math followed the
+/// device while pitch did not.
+#[test]
+fn test_a_device_rate_change_mid_playback_re_derives_the_conversion() {
+    let id = 1u64;
+    let source_rate = 48_000u32;
+    let frames = (source_rate as usize) * 8;
+    let mut sampler = SamplerProcessor::new(id);
+
+    let mut metadata = SampleMetadata::new_empty();
+    metadata.total_samples = frames as u64;
+    metadata.channels = 1;
+    metadata.sample_rate = source_rate;
+    metadata.bpm = 0.0;
+
+    sampler.apply_topology_mutation(TopologyMutation::AddSource {
+        node_idx: id as u32,
+        buffer: Arc::new(vec![0.25f32; frames]).into(),
+        sample_id: id,
+        metadata: Some(Arc::new(metadata)),
+    });
+
+    let mut transport = Transport {
+        bpm: 120.0,
+        beat_position: 0.0,
+        is_playing: true,
+        sample_rate: 44_100.0,
+        absolute_samples: 0,
+        system_time_ns: 0,
+        device_time_ns: 0,
+    };
+    {
+        let ctx = ProcessContext { transport: Some(&transport), host: None, sub_block_offset: 0, is_last_sub_block: true };
+        sampler.apply_command_with_context(
+            &Command::Performance(PerformanceCommand::PlayNode { node_idx: id as u32 }),
+            Some(&ctx),
+        );
+    }
+
+    let mut out = vec![0.0f32; BLOCK];
+    let mut consumed_per_block = |sampler: &mut SamplerProcessor, transport: &Transport| -> f64 {
+        let before = sampler.voices.iter().find(|v| v.is_active).expect("voice active").play_head;
+        for _ in 0..16 {
+            out.fill(0.0);
+            let mut outs: Vec<&mut [f32]> = vec![&mut out];
+            let mut ctx = ProcessContext { transport: Some(transport), host: None, sub_block_offset: 0, is_last_sub_block: true };
+            sampler.process(&[], &mut outs, &mut ctx);
+        }
+        let after = sampler.voices.iter().find(|v| v.is_active).expect("voice still active").play_head;
+        (after - before) / 16.0
+    };
+
+    // At 44.1 kHz a 48 kHz source is correctly consumed FASTER than realtime.
+    let at_44k = consumed_per_block(&mut sampler, &transport);
+    let expected_44k = BLOCK as f64 * (48_000.0 / 44_100.0);
+    assert!(
+        (at_44k - expected_44k).abs() < 0.5,
+        "precondition failed: at a 44.1 kHz device a 48 kHz source consumed {at_44k:.2} \
+         frames per block, expected {expected_44k:.2}"
+    );
+
+    // Now the operator switches the device to 48 kHz. Source and device agree,
+    // so the voice must consume exactly one frame of source per output frame.
+    transport.sample_rate = 48_000.0;
+    let at_48k = consumed_per_block(&mut sampler, &transport);
+    let expected_48k = BLOCK as f64;
+    let semitones = 12.0 * (at_48k / expected_48k).log2();
+    assert!(
+        (at_48k - expected_48k).abs() < 0.5,
+        "after switching the device to 48 kHz, the playing 48 kHz source still consumed \
+         {at_48k:.2} frames per {BLOCK}-frame block instead of {expected_48k:.2} — \
+         {semitones:+.2} semitones out. The voice is still converting for the previous \
+         device rate; source_rate_ratio is set at trigger time and never re-derived."
+    );
+}
