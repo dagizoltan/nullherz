@@ -474,6 +474,12 @@ it was 28.7 ms when every deck carried a 1024-point vocoder unconditionally.
 
 ### 5.1 🔴 The deck FX rack is a façade
 
+> **Status since this audit:** resolved for the DECK rack — four positional
+> slots per deck, every control wired. The pad-subchannel half is open and
+> re-filed as debt §3.1, because it is a different defect (no per-pad nodes
+> exist at all). The finding below is preserved as written, as the record of
+> what the audit found.
+
 This is the most serious product-level finding in the audit. Four independent
 defects compound.
 

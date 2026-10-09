@@ -10,12 +10,14 @@
 >    enumeration costs 9–10 ms per call and runs synchronously on
 >    `Conductor::tick()`, against a 5.805 ms budget. Debt §1.1. A ✅ below means
 >    *reachable*; it does not mean the gate is green.
-> 2. **✅ means reachable, not fully controllable.** The deck FX rack is the
->    exception that proves it: the bootstrap allocates **one** FX insert slot per
->    deck, while the UI presents an unbounded, reorderable, removable rack whose
->    remove, reorder and parameter controls emit **no commands at all**. A second
->    hot-loaded FX silently replaces the first. Debt §3.1. Rows tagged
->    **⚠️ one-slot** below inherit that limitation.
+> 2. **✅ means reachable, not fully controllable** — still the right warning to
+>    read these rows with, though the example that used to carry it is gone. The
+>    deck FX rack *was* that example: one engine slot under an unbounded UI rack
+>    whose remove, reorder and parameter controls emitted no commands. It is now
+>    four positionally-bound slots per deck with every control wired (debt §4),
+>    so the **⚠️ one-slot** tag no longer applies to any row. What remains in
+>    that shape is the **pad subchannel strips** — see their row below and debt
+>    §3.1; there the UI is finished and the audio subsystem does not exist.
 
 ---
 
@@ -113,7 +115,7 @@
 | **Visual Mixer View** | ✅ | Modular visual channels with 64-neuron Spiking Neural Networks, per-pixel warp feedback, detached windows. |
 | **Sidecar Store View** | ✅ | Sidebar/tab view rendering interactive tag filters (`insert`, `instrument`, `neural`, `delay`, `visual`, `eq`). |
 | **Deck FX Insert Rack** | ✅ | 4 positional slots per deck, each bound to a `deck_<x>_fx<n>` node: load/remove via `SwapProcessor` (empty = `BYPASS`), reorder as a real topology edit, per-slot ramped `SetParam`. Bounded by the graph — a full rack disables the load button rather than overwriting a slot. |
-| **Pad Subchannel Strips** | ⚠️ | Display only. The graph has one `drum_machine_node` and no per-pad strip, so the pad rack, fader, GAIN, PITCH and EQ write UI state and reach no processor. Remove/reorder disabled; see debt §1.7. |
+| **Pad Subchannel Strips** | ⚠️ | Display only. The graph has one `drum_machine_node` and no per-pad strip, so the pad rack, fader, GAIN, PITCH and EQ write UI state and reach no processor. Remove/reorder disabled; see debt §3.1. |
 
 ---
 
