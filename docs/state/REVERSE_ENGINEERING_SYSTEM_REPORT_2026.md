@@ -43,8 +43,11 @@ a competitor to match quickly:
 
 Three things are, on measurement, below the standard the engine sets:
 
-1. **The verification gate is RED.** `scripts/verify.sh` fails today, reproducibly
-   (5/5), on a control-path budget. (§3)
+1. **The verification gate was RED; the control-path budget is now fixed.**
+   `scripts/verify.sh` failed reproducibly (5/5) on a control-path budget —
+   synchronous ALSA device enumeration on `Conductor::tick()`. Fixed by moving
+   enumeration to a background thread; the report's own attribution of the cost
+   was wrong and is corrected in §3.2. (§3)
 2. **The deck FX rack is presentational.** The engine allocates **one** FX slot
    per deck; the UI presents an unbounded, reorderable, removable rack whose
    remove, reorder, and parameter controls emit no commands at all. (§5.1)
@@ -103,9 +106,9 @@ PipeWire 429, CoreAudio 241, JACK 157, Mock 52.
 
 ---
 
-## 3. 🔴 Gate status: RED
+## 3. ✅ Gate status: the control-path stall is FIXED
 
-### 3.1 The failure
+### 3.1 The failure, as filed
 
 ```bash
 cargo test --release -p nullherz-conductor --test long_track_control_path_test
@@ -113,69 +116,113 @@ cargo test --release -p nullherz-conductor --test long_track_control_path_test
 
 ```
 test test_long_track_does_not_stall_the_control_path ... FAILED
-tick() took 10.81ms, over the 5.805ms audio-block budget
+tick() took 10.783496ms, over the 5.804989ms audio-block budget
 ```
 
-Reproduced **5/5** at 10.50–11.05 ms. This is not scheduler jitter: the spread
-is 0.5 ms around a 1.85× overrun. `worst_telemetry` passes; the breach is
-isolated to `Conductor::tick()`.
+Reproduced 5/5 at 10.50–11.05 ms. Not scheduler jitter: the spread was 0.5 ms
+around a 1.85× overrun, and `worst_telemetry` passed — the breach was isolated
+to `Conductor::tick()`.
 
-### 3.2 Root cause — measured
+### 3.2 Root cause — and a correction to this report's own measurement
 
-`Conductor::tick()` calls `refresh_audio_devices()`
-([orchestrator.rs:1338](../../crates/nullherz-conductor/src/orchestrator.rs:1338)).
-When the active backend reports no devices — which is the case before a backend
-is attached, and whenever the selected backend enumerates empty — it falls
-through to `AlsaBackend::new().enumerate_devices()`.
+`Conductor::tick()` called `refresh_audio_devices()`, which falls through to
+`AlsaBackend::new().enumerate_devices()` when the active backend reports no
+devices (true before a backend is attached, and whenever the selected backend
+enumerates empty). That call cost 9–10 ms on **every** invocation.
 
-Measured cost of that call on this machine:
+The previous edition of this report attributed that cost to `AlsaLib::load()`
+re-`dlopen`ing `libasound.so.2` and re-resolving ~40 symbols "on each
+invocation". **Measured directly, that is not where the time goes:**
 
 ```
-MockBackend::enumerate_devices   → 2 devices in 0.0008 ms
-AlsaBackend::enumerate_devices   → 25 devices in 9.1–10.0 ms   (5 consecutive calls)
+round 0: dlopen= 325.572µs  31 dlsym=  15.319µs  snd_device_name_hint=  16.140ms (31 hints)
+round 1: dlopen=   1.082µs  31 dlsym=  15.119µs  snd_device_name_hint=  14.877ms (31 hints)
+round 2: dlopen=   1.012µs  31 dlsym=  13.996µs  snd_device_name_hint=  15.056ms (31 hints)
+round 3: dlopen=   1.032µs  31 dlsym=  15.058µs  snd_device_name_hint=  15.065ms (31 hints)
 ```
 
-**9–10 ms, every call, not just the first.** `AlsaLib::load()` re-`dlopen`s
-`libasound.so.2` and re-resolves ~40 symbols on each invocation, then
-`snd_device_name_hint(-1, "pcm", …)` walks the entire ALSA configuration tree
-from disk. Nothing is cached between calls.
+A repeat `dlopen` is **~1 µs**, not a re-resolution: the dynamic loader keeps the
+library mapped and refcounted, so the second and later calls hand back the same
+handle without touching the filesystem. Symbol resolution is ~15 µs for all 31.
+The entire per-call cost — 99.9% of it — is `snd_device_name_hint` re-walking
+ALSA's configuration tree from disk, **15.0 ms every call**.
 
-`refresh_audio_devices()` already caches its *result* for 5 s — the comment
-above it says enumeration "must never run per frame", so the cost was known.
-What is not handled is that the **cold and the 5-secondly call both land
-synchronously on the tick thread**.
+This matters because it changes which fix works, not just the bookkeeping. See
+§3.4.
 
 ### 3.3 Severity — stated precisely
 
-The failing test's message says *"something slow is holding the engine lock"*.
-That mechanism is not what is happening here: `refresh_audio_devices()` takes no
-engine lock, and `sync_session_rate()` scopes its lock to two statements. **A
-slow tick does not directly stall rendering.**
+The failing test's message said *"something slow is holding the engine lock"*.
+That mechanism was never what happened: `refresh_audio_devices()` takes no
+engine lock, and `sync_session_rate()` scopes its lock to two statements. A slow
+tick does not directly stall rendering. **The message has been corrected** to
+state what a slow tick actually costs.
 
-What it does breach is `AGENTS.md` §1: *"the conductor tick/command path is
+What it breached is `AGENTS.md` §1: *"the conductor tick/command path is
 latency-critical too (it feeds the RT command ring): no blocking work — file
-decode, disk I/O — inline in a command handler."* A 10 ms tick delays every
-queued command — including `Play` — by up to 10 ms, and starves telemetry for
-two audio blocks. On a machine with more sound cards, or a networked ALSA
-config, it is worse.
+decode, disk I/O — inline in a command handler."* A 10 ms tick delayed every
+queued command — `Play` included — by that long, and left that tick's telemetry
+uncollected. On a machine with more sound cards, or a networked ALSA config, it
+is worse.
 
-**Classification:** control-path stall, P0 (it is the gate), not an audio
+**Classification:** control-path stall, P0 (it was the gate), not an audio
 dropout.
 
-### 3.4 Fix
+### 3.4 The fix, as landed
 
-Two independent changes, either of which clears the budget:
+The previous edition prescribed two changes and called them *"two independent
+changes, either of which clears the budget"*. **That was wrong, and measurement
+settled it:**
 
-1. Cache the `AlsaLib` handle in a `OnceLock` so `dlopen` + 40 `dlsym` happen
-   once per process instead of once per enumeration.
-2. Move enumeration off the tick: run it on a background thread and publish into
-   `cached_audio_devices` through a channel, the same pattern async track
-   hydration already uses in this file.
+| Change | Measured result |
+| :--- | :--- |
+| (1) `OnceLock` the `AlsaLib` handle, alone | **still failing at 11.16 ms** |
+| (2) enumeration off the tick, via background thread + channel | **passing, 5/5** |
 
-(2) is the one that makes the budget robust rather than merely faster, because
-it removes an unbounded foreign-library call from a latency-critical path
-instead of shrinking it. Recommend both: (1) is three lines and helps every
-other caller.
+(1) cannot clear the budget, because the cost it removes is ~16 µs of the ~15 ms
+(§3.2). Both landed — (1) is still worth having, since it buys the 326 µs cold
+resolution for every caller (`start`, `enumerate_devices`,
+`probe_hardware_capabilities` each used to re-resolve the whole table) — but (2)
+is the fix, and it is the robust one in any case: it removes an unbounded
+foreign-library call from a latency-critical path rather than shrinking it.
+
+As built:
+
+* Enumeration runs on a named `device-scan` thread and publishes into
+  `cached_audio_devices` through an `mpsc` channel that `tick()` drains with
+  `try_iter()` — the shape async track hydration already uses in the same
+  function. `thread::Builder`, not the `clippy.toml`-banned `thread::spawn`, and
+  no new locks.
+* One scan in flight at a time via an `AtomicBool` released through a `Drop`
+  guard, so a panic inside libasound cannot wedge enumeration for the life of
+  the process.
+* The list is seeded with `default` — which always resolves — so the settings
+  device picker is never empty while the first scan runs.
+* `Box<dyn AudioBackend>` cannot be shared with a thread, so the scan asks a
+  fresh backend of `BackendManager::active_type`. Sound because every backend's
+  `enumerate_devices` is a stateless driver query reading nothing `start()` set,
+  and constructing one is a few atomics that open no device.
+* `AlsaLib` lost its `Drop`: the one instance lives in a `OnceLock` that is never
+  dropped, and a `dlclose` there would unload the library every handed-out
+  `&'static AlsaLib` points into — the audio thread's included.
+
+**Two gates would have gone vacuous.** `telemetry_hot_path_test.rs` counted
+`enumerate_devices()` calls through an injected live backend, which the scan no
+longer touches — those assertions would have passed at zero forever, the failure
+mode `AGENTS.md` §4 calls *"worse than no check"*. They now count
+`Conductor::device_scans_started()`, and a new test
+(`test_the_background_scan_publishes_what_it_found`) covers the hazard the async
+hand-off introduces: a scan whose answer never arrives looks exactly like a fast
+tick. It was confirmed to fail when the channel drain is removed.
+
+**One flake to know about.** `test_control_path_cost_does_not_scale_with_track_length`
+failed once under `cargo test --workspace` parallelism, then passed on re-run and
+is not reproducible (5/5 alone, 4/4 under 16 CPU spinners, clean in both release
+runs). This is not claimed as unrelated: the scan now runs *concurrently* with
+the measured loop, a jitter source in `worst_telemetry` that did not exist while
+the scan was synchronous. Symmetric noise rather than a systematic regression —
+if it needs to be airtight, the test should settle the first scan before
+measuring.
 
 ---
 
@@ -590,49 +637,16 @@ survived end to end.
 
 ---
 
-## 5. Comprehensive Issue & Technical Debt Inventory
-
-### 5.1 Real-Time & Audio DSP Issues
-1. **MXCSR Thread State Leakage in Test Harnesses [RESOLVED]**:
-   - *Detail*: Tests invoking `setup_rt_thread` set FTZ/DAZ on CPU control registers. When `golden_render_is_bit_stable` ran on worker threads in `cargo test`, MXCSR state was normalized.
-   - *Fix*: Updated `golden_render_tests.rs` to explicitly invoke `FpControlGuard::apply_ftz_daz()`, ensuring golden hash verification matches real-time audio thread execution state consistently (`0x5dbc9e3eb4d51f2d`).
-2. **Disk Streaming Manager Stereo Upgrade [RESOLVED]**:
-   - *Location*: `crates/nullherz-conductor/src/streaming_manager.rs` and `crates/nullherz-processors/src/streaming_sampler.rs`.
-   - *Detail*: Upgraded `StreamingManager` and `StreamingSamplerProcessor` to support full stereo audio streaming. Interleaved stereo pairs ($L_i, R_i$) are pushed to the shared-memory ring buffer, and `StreamingSamplerProcessor` routes separate Left and Right outputs.
-3. **PTP Hardware Timestamping Fallback**:
-   - *Location*: `crates/nullherz-conductor/src/ptp_engine.rs` and `crates/nullherz-traits/src/clock.rs`.
-   - *Detail*: `PtpClockProvider` implements raw socket `SO_TIMESTAMPING` timestamp extraction, but `PtpEngine` timestamps packet arrival via `get_system_time_ns()`. Integrating true hardware RX timestamps directly into the engine arrival path remains open.
-4. **Non-Power-of-Two Spectral FFT Block Handling**:
-   - *Location*: `crates/nullherz-processors/src/spectral.rs`.
-   - *Detail*: Spectral FFT kernels assume power-of-two block sizes $\le 1024$. Arbitrary non-power-of-two buffer sizes require overlap-add buffering wrappers.
-5. **Retired Sample Buffer Drops on RT Thread**:
-   - *Location*: `crates/audio-core/src/engine/resource_recycler.rs`.
-   - *Detail*: Replacing a sample buffer drops the original `Arc<Vec<f32>>` on the RT thread if not retained in the sample registry. A lock-free garbage collection ring should defer deallocations off-thread.
-6. **Synchronous Audio-Device Enumeration on the Conductor Tick [RESOLVED 2026-10-08]**:
-   - *Location*: `crates/nullherz-conductor/src/orchestrator.rs` (`refresh_audio_devices`, `scan_audio_devices`), `crates/nullherz-conductor/src/backend.rs` (`BackendManager::active_type`), `crates/nullherz-backends/src/alsa.rs` (`ALSA_LIB`).
-   - *Detail*: This is the third incarnation of one bug — an expensive driver query on a latency-critical thread. It was first per telemetry frame (74.6 ms × 187/s), then moved to a 5-second result cache that was still **synchronous on `tick()`**, the thread that feeds the RT command ring. `snd_device_name_hint` re-walks ALSA's whole config tree from disk on every call (**15.0 ms** measured here, 31 hints), so one tick in ~860 cost 10.8 ms against the 5.8 ms audio-block budget: every command queued behind that tick, `Play` included, was delayed by it, and that tick's telemetry went uncollected. Caught by `test_long_track_does_not_stall_the_control_path`, not by review.
-   - *Fix*: The scan runs on a named `device-scan` thread and publishes into `cached_audio_devices` through an `mpsc` channel drained with `try_iter()` on the tick — the async track-hydration pattern mandated by AGENTS.md §1. One scan in flight at a time via an `AtomicBool` released through a `Drop` guard; device list seeded with `default` so the picker is never empty. `AlsaLib` is additionally cached in a `OnceLock`, so the `dlopen`/`dlsym` resolution happens once per process for every caller.
-   - *Measured correction to the filed diagnosis*: the `dlopen` + ~40 `dlsym` was **not** the per-call cost it was reported to be. Standalone measurement: `dlopen` 326 µs cold / ~1 µs warm, symbol resolution ~15 µs, versus 15.0 ms for the hint walk on every single round. The `OnceLock` alone left the test failing at 11.2 ms. Removing the call from the latency-critical path — not speeding it up — is what fixed the budget, and is the only version of the fix that stays fixed when the host has more cards.
-
-### 5.2 UI/UX Micro-Frictions & Usability
-1. **DAW Step Grid Velocity Sensitivity [RESOLVED]**:
-   - *Location*: `crates/nullherz-inspector/src/views/composer.rs`.
-   - *Detail*: Smoothed step velocity dragging sensitivity (`0.005`) for high-DPI mouse precision and added step hover tooltips (`STEP N: VELOCITY XX%`).
-2. **Detached Visual Window 60 Hz Smoothing [RESOLVED]**:
-   - *Location*: `crates/nullherz-inspector/src/main.rs`.
-   - *Detail*: Locked detached viewports and main window rendering cadence to 16ms (60 Hz) when `has_detached` is true.
-3. **Input Source Signal Badges**: Channel input selector dropdowns in System Mixer lack live green signal presence indicators.
-4. **Organism Editor Parameter Grouping**: 64-D genome weights require high-level macro sliders (Morphology, Chaos, Reactivity, Symmetry) for live performance.
 ## 6. Issue inventory
 
 Ordered by what it costs to leave alone. Every entry names a file and a way to
 see it.
 
-### P0 — the gate is red
+### P0 — **cleared**
 
 | # | Issue | Location | Evidence |
 | :--- | :--- | :--- | :--- |
-| 1 | `tick()` 10.8 ms vs 5.8 ms budget: ALSA device enumeration (9–10 ms/call, uncached `dlopen` + full config-tree walk) runs synchronously on the control path | `orchestrator.rs:1338`, `backends/src/alsa.rs:642` | §3; 5/5 reproduction |
+| 1 | ~~`tick()` 10.8 ms vs 5.8 ms budget: ALSA device enumeration runs synchronously on the control path~~ **RESOLVED.** The per-call cost is `snd_device_name_hint` re-walking ALSA's config tree (15.0 ms every call), **not** the `dlopen`/`dlsym` this report first blamed (~16 µs warm) — so the `OnceLock` alone left it failing at 11.2 ms. Enumeration now runs on a `device-scan` thread publishing through an `mpsc` channel | `orchestrator.rs` (`refresh_audio_devices`, `scan_audio_devices`), `backend.rs` (`active_type`), `backends/src/alsa.rs` (`ALSA_LIB`) | §3; test green 5/5, release suite 554 passed, smoke 0 xruns |
 
 ### P1 — a user can see it
 
@@ -683,7 +697,7 @@ its own `Arc` (latent, now that the manager is wired).
 
 | # | Action | Why this order | Cost |
 | ---: | :--- | :--- | :--- |
-| 1 | Move ALSA enumeration off `tick()` (+ `OnceLock` the lib handle) | The gate is the thing that makes every other number trustworthy. Nothing else should be merged over a red gate. | hours |
+| 1 | ~~Move ALSA enumeration off `tick()` (+ `OnceLock` the lib handle)~~ **DONE.** Note for the record: the `OnceLock` was *not* sufficient on its own (§3.4) — the background thread is what cleared the budget | The gate is the thing that makes every other number trustworthy. Nothing else should be merged over a red gate. | done |
 | 2 | Allocate 4 `fx_ids` per deck; wire remove/reorder/`SetParam` to commands; drop the three seeded label-inserts; delete the `unwrap_or(i*4+2)` fallback | Turns the 16 "available for FX chains" processors from reachable into usable. Highest value-per-hour in the report. | days |
 | 3 | Add `fx1..fxN` to the reachability gate's explicit name list | Makes (2) stay fixed. A gate that cannot see `format!` names will let it regress. | minutes |
 | 4 | Give the reverb a sample rate: scale delays from `ctx.transport.sample_rate`, add stereo spread, go to 8+4 combs/allpasses | Cheapest audible quality win in the tree, and (1)+(2) make it reachable enough to matter | days |
@@ -692,16 +706,6 @@ its own `Arc` (latent, now that the manager is wired).
 | 7 | Route organism genes to the visual sidecars, or remove the 26 controls | Either is better than a surface that pretends | week |
 | 8 | Replace KeySync's bin remap with time-stretch + resampling | Already specified by its own probe; reuses the −129 dB kernel | weeks |
 
-| Priority | Category | Task | Target Path | Status |
-| :---: | :---: | :--- | :--- | :---: |
-| **P0** | **DSP / Tests** | Explicit MXCSR FTZ/DAZ in Golden Render Harness | `crates/nullherz-processors/src/golden_render_tests.rs` | **COMPLETED** |
-| **P0** | **UI / Graphics** | Decouple Detached Visual Viewport Frame Cadence (60Hz) | `crates/nullherz-inspector/src/main.rs` | **COMPLETED** |
-| **P0** | **Conductor** | Move Audio-Device Enumeration Off the Latency-Critical Tick | `crates/nullherz-conductor/src/orchestrator.rs` | **COMPLETED** |
-| **P1** | **UI / Waveform**| Sub-Frame Linear Playhead Interpolation | `crates/nullherz-inspector/src/views/dj_studio/waveform.rs` | **COMPLETED** |
-| **P1** | **Backend** | 1-Click Exclusive ALSA Hardware Performance Mode | `crates/nullherz-inspector/src/views/settings/audio.rs` | **COMPLETED** |
-| **P2** | **Conductor** | Disk Streaming Ring Teardown & Stereo Upgrade | `crates/nullherz-conductor/src/streaming_manager.rs` | **COMPLETED** |
-| **P2** | **UI / DAW** | Step Grid Velocity Drag Exponential Smoothing | `crates/nullherz-inspector/src/views/composer.rs` | **COMPLETED** |
-| **P2** | **UI / Organisms**| Organism 64-D Genome Macro Slider Groupings | `crates/nullherz-inspector/src/views/organism_editor.rs` | **OPEN** |
 Note what is **not** on this list: anything architectural. The triple-plane
 split, the slot discipline, the off-thread compiler, the PDC machinery and the
 command path all survived this audit without a finding against them.
