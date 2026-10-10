@@ -35,9 +35,22 @@ impl NeuralFilterProcessor {
 }
 
 impl SignalProcessor for NeuralFilterProcessor {
-    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], _ctx: &mut ProcessContext) {
+    fn process(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], ctx: &mut ProcessContext) {
         let num_ch = inputs.len().min(outputs.len()).min(16);
-        let sample_rate = 48000.0f32;
+        // The rate the DEVICE is running at, not a guess.
+        //
+        // This was `let sample_rate = 48000.0f32;` with `ctx` ignored, so the
+        // cutoff was computed against a constant: a nominal 1 kHz corner landed
+        // at ~1088 Hz on a 44.1 kHz device and ~500 Hz at 96 kHz. Same defect
+        // the reverb had, and the same fix — read the transport, fall back only
+        // when there is none (an `AddSource` topology mutation carries no
+        // `ProcessContext`).
+        let sample_rate = ctx
+            .transport
+            .as_ref()
+            .map(|t| t.sample_rate)
+            .filter(|r| *r > 0.0)
+            .unwrap_or(nullherz_traits::DEFAULT_SAMPLE_RATE);
         let w0 = (std::f32::consts::TAU * self.cutoff / sample_rate).clamp(0.001, 3.0);
         let g = (w0 * 0.5).tan();
         let k = (1.0 / self.resonance).clamp(0.1, 2.0);
