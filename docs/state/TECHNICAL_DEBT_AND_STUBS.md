@@ -34,7 +34,7 @@ Both of these described real defects when written. Neither is true today.
   held as a field at `:73`, and `start_stream` is called from
   [`command_handler.rs:181`](../../crates/nullherz-conductor/src/command_handler.rs:181).
   The *latent teardown bug* it also described is still open and has been
-  re-filed as §1.2 below — now that the manager is reachable, that bug is too.
+  re-filed as §1.3 below — now that the manager is reachable, that bug is too.
 * **The device-enumeration cost was misattributed.** The previous edition filed
   the `tick()` stall as §1.1 and put its **9.1–10.0 ms per call** on
   `AlsaLib::load()` re-`dlopen`ing `libasound.so.2` and re-resolving ~40 symbols
@@ -60,7 +60,42 @@ Both of these described real defects when written. Neither is true today.
 
 ## 1. Open — Orchestration & Control Path
 
-### 1.1 PTP: hardware RX timestamps not in the engine arrival path
+### 1.1 🟠 The engine is reached through a `&mut` derived from a shared `Arc`
+
+* *Location:* [`engine/mod.rs`](../../crates/audio-core/src/engine/mod.rs)
+  (`process_block`), the five backends' audio threads, and
+  [`builder.rs`](../../crates/audio-core/src/engine/builder.rs) (`controller`).
+* *Detail:* `process_block` takes `&mut self`, but the engine lives in an
+  `Arc<dyn RenderingEngine>` inside `Arc<Mutex<Option<..>>>`. Callers get their
+  `&mut` with `Arc::as_ptr(engine_arc) as *mut dyn RenderingEngine`. Deriving a
+  `&mut` from a shared `Arc` is UB regardless of how many threads are involved.
+* *What was already fixed, and what was not:* the CONCURRENT case is gone.
+  `ConfigureAudioEngine` used to call `set_config` — which runs
+  `graph.setup()` and resizes the buffers the audio thread is reading — while
+  that thread rendered. It now stops the device first, and `set_config` takes
+  `&self`, so no control-plane `&mut` exists at all. What remains is the audio
+  thread's own `&mut` for `process_block`: one at a time, never concurrent,
+  still formally derived from a shared `Arc`.
+* *Why the obvious reading of the code is wrong:* both mutation sites were
+  written as `match Arc::get_mut(..) { Some(e) => .., None => /* unsafe cast */ }`,
+  which looks like a safe path with a rare fallback. It is the reverse.
+  `EngineBuilder::build` keeps a second clone of the engine as
+  `EngineHandle::controller` (`engine.clone() as Arc<dyn RenderingController>`),
+  held for the session by `engine_coordinator`, so `strong_count` is **2 before
+  any backend starts** and 3 while one runs. `Arc::get_mut` can never succeed;
+  the `Some` arm had never executed. Measured by making the `None` arm refuse:
+  it fires with "still shared (2 refs)" on a conductor with no backend attached.
+  Do not read that match shape as evidence of safety anywhere else either.
+* *The remaining fix:* the audio thread should OWN the engine rather than share
+  it — the backend takes it by value on `start` and hands it back on `stop`, so
+  `process_block` needs no `Arc` at all. `RenderingController` is one `&self`
+  method (`set_pending_graph`) and does not need the engine, so the control
+  plane can keep a handle without keeping a strong reference to it. Not
+  attempted yet because it changes `AudioBackend::start`'s signature across
+  five backends and the `engine_handle` type the conductor reads
+  `target_sample_rate` through.
+
+### 1.2 PTP: hardware RX timestamps not in the engine arrival path
 
 * *Location:* [`ptp_engine.rs`](../../crates/nullherz-conductor/src/ptp_engine.rs),
   [`traits/src/clock.rs`](../../crates/nullherz-traits/src/clock.rs).
@@ -74,7 +109,7 @@ Both of these described real defects when written. Neither is true today.
   master/slave roles are constructor flags with **no IEEE-1588 Best-Master-Clock
   election**.
 
-### 1.2 `StreamingManager` per-stream threads cannot terminate
+### 1.3 `StreamingManager` per-stream threads cannot terminate
 
 * *Location:* [`streaming_manager.rs`](../../crates/nullherz-conductor/src/streaming_manager.rs)
   (`start_stream`, line ~31).

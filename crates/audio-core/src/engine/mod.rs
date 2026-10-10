@@ -101,7 +101,13 @@ pub struct AudioEngine<K: ProcessingKernel = StandardKernel> {
     pub host: Option<EngineHost>,
     pub pool: Option<Box<dyn nullherz_traits::ParallelExecutor>>,
     pub transport: nullherz_traits::Transport,
-    pub target_sample_rate: f32,
+    /// The rate the device is asked for, and the rate the transport follows.
+    ///
+    /// An atomic rather than an `f32` so `set_config` can take `&self`. The
+    /// alternative was for the control plane to obtain `&mut` to the engine,
+    /// which it can only do by casting a shared `Arc` — see
+    /// `TECHNICAL_DEBT_AND_STUBS.md` §1.1.
+    pub target_sample_rate: std::sync::atomic::AtomicU32,
     pub logger: Arc<RtLogger>,
 
     // Pre-allocated FFT resources for RT-safe spectrum analysis
@@ -116,12 +122,12 @@ impl<K: ProcessingKernel> nullherz_traits::RenderingEngine for AudioEngine<K> {
         self.process_block(inputs, outputs, num_samples);
     }
 
-    fn set_config(&mut self, config: nullherz_traits::AudioConfig) {
+    fn set_config(&self, config: nullherz_traits::AudioConfig) {
         self.set_config(config);
     }
 
     fn target_sample_rate(&self) -> f32 {
-        self.target_sample_rate
+        f32::from_bits(self.target_sample_rate.load(std::sync::atomic::Ordering::Relaxed))
     }
 
     fn pull_all_snapshots(&self, target: &mut Vec<(u64, Arc<Vec<f32>>)>) {
@@ -207,7 +213,9 @@ impl<K: ProcessingKernel> AudioEngine<K> {
                 system_time_ns: 0,
                 device_time_ns: 0,
             },
-            target_sample_rate: nullherz_traits::DEFAULT_SAMPLE_RATE,
+            target_sample_rate: std::sync::atomic::AtomicU32::new(
+                nullherz_traits::DEFAULT_SAMPLE_RATE.to_bits(),
+            ),
             logger,
             fft_plan: audio_dsp::SimdFft::new(1024),
             fft_re: audio_dsp::AlignedBuffer::new(1024),
@@ -242,10 +250,33 @@ impl<K: ProcessingKernel> AudioEngine<K> {
         self.xrun_count.clone()
     }
 
-    pub fn set_config(&mut self, config: nullherz_traits::AudioConfig) {
-        self.target_sample_rate = config.sample_rate;
-        self.transport.sample_rate = config.sample_rate;
-        // SAFETY: We have &mut self here.
+    /// Re-configure the engine. Takes `&self`.
+    ///
+    /// `&self`, not `&mut self`, and that is the point: the engine lives in an
+    /// `Arc<dyn RenderingEngine>`, so a caller wanting `&mut` could only get it
+    /// by casting the shared `Arc` — which is UB, and which every caller of
+    /// this method was doing. `Arc::get_mut` is not an escape: a second clone
+    /// lives in `EngineHandle::controller` for the life of the session, so it
+    /// never succeeds. See `TECHNICAL_DEBT_AND_STUBS.md` §1.1.
+    ///
+    /// Nothing here needed `&mut` in the first place:
+    ///
+    ///  - `target_sample_rate` is an atomic.
+    ///  - `graph.setup()` goes through `get_active_graph_mut`, which was
+    ///    already a `&self` method.
+    ///  - `transport.sample_rate` is the only field that genuinely belongs to
+    ///    the RT thread, so it is no longer written from here at all: `process`
+    ///    picks the rate up from the atomic at the top of each block.
+    ///
+    /// PRECONDITION, unchanged: the caller must not be racing the audio thread.
+    /// `graph.setup()` resizes node buffers, and no `&self` signature makes that
+    /// safe to do under a live renderer — `ConfigureAudioEngine` stops the
+    /// device first, and an `OfflineRenderer` never starts one.
+    pub fn set_config(&self, config: nullherz_traits::AudioConfig) {
+        self.target_sample_rate
+            .store(config.sample_rate.to_bits(), std::sync::atomic::Ordering::Relaxed);
+        // SAFETY: same contract as every other caller of this accessor — no
+        // other thread is touching the graph. See the precondition above.
         let graph = unsafe { self.graph_manager.get_active_graph_mut() };
         graph.setup(config);
     }
@@ -264,6 +295,17 @@ impl<K: ProcessingKernel> AudioEngine<K> {
         let start_cycles = crate::get_cycles();
         let num_samples = outputs.first().map(|o| o.len()).unwrap_or(0);
         if num_samples == 0 { return; }
+
+        // Adopt a configured rate, if one landed since the last block.
+        //
+        // `set_config` takes `&self` and cannot write RT-owned state, so the
+        // transport follows the atomic here instead — one relaxed load and a
+        // compare, on the thread that owns `transport`.
+        let configured =
+            f32::from_bits(self.target_sample_rate.load(std::sync::atomic::Ordering::Relaxed));
+        if self.transport.sample_rate != configured {
+            self.transport.sample_rate = configured;
+        }
 
         let host_ref = self.host.as_ref().map(|h| h as &dyn nullherz_traits::Host);
         // SAFETY: We are on the real-time thread.

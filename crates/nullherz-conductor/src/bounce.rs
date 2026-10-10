@@ -58,33 +58,16 @@ impl OfflineRenderer {
         // normal case, since a 1024-frame period is ~21 ms of latency.
         let block_size = nullherz_traits::MAX_BLOCK_SIZE;
         {
-            let mut engine_lock = self.conductor.engine_coordinator.backend_manager.engine_handle.lock();
-            if let Some(ref mut engine_arc) = *engine_lock {
-                let config = nullherz_traits::AudioConfig { sample_rate, block_size };
-                match Arc::get_mut(engine_arc) {
-                    Some(engine) => engine.set_config(config),
-                    // This arm is the one that runs, always.
-                    //
-                    // `get_mut` cannot succeed: `EngineBuilder::build` keeps a
-                    // second clone of the engine as `EngineHandle::controller`
-                    // (`engine.clone() as Arc<dyn RenderingController>`), held
-                    // for the session by `engine_coordinator`, so `strong_count`
-                    // is 2 from construction. The `Some` arm is dead code —
-                    // worth knowing before trusting the shape of this match.
-                    //
-                    // Why it is not a race HERE: an `OfflineRenderer` owns a
-                    // PRIVATE `Conductor` and never calls `start_backend`, so no
-                    // audio thread exists to contend with `graph.setup()`
-                    // resizing node buffers. The remaining problem is the
-                    // aliasing itself — a `&mut` derived from a shared `Arc` is
-                    // UB by the letter — which wants `set_config` to take
-                    // `&self` with interior mutability, as `set_pending_graph`
-                    // beside it already does.
-                    None => {
-                        let ptr = Arc::as_ptr(engine_arc) as *mut dyn nullherz_traits::RenderingEngine;
-                        unsafe { (*ptr).set_config(config) };
-                    }
-                }
+            // `set_config` takes `&self`, so no `Arc::get_mut` and no cast.
+            // See TECHNICAL_DEBT_AND_STUBS.md §1.1 for what used to be here and
+            // why the `Some` arm of that match was dead code.
+            //
+            // The precondition is unchanged: `set_config` resizes node buffers,
+            // and an `OfflineRenderer` owns a PRIVATE `Conductor` that never
+            // calls `start_backend`, so no audio thread exists to race it.
+            let engine_lock = self.conductor.engine_coordinator.backend_manager.engine_handle.lock();
+            if let Some(ref engine) = *engine_lock {
+                engine.set_config(nullherz_traits::AudioConfig { sample_rate, block_size });
             }
         }
 
