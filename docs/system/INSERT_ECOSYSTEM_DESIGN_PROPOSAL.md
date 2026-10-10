@@ -59,7 +59,7 @@ processor files:
 | :--- | ---: | :--- |
 | `set_parameter` | 39 / 42 | — |
 | `metadata()` → declared params | **27 / 42** | 15 processors expose no parameters to any host |
-| `setup(AudioConfig)` | **16 / 42** | 26 processors never learn the sample rate |
+| `setup(AudioConfig)` | 16 / 42 | 26 processors do not implement it — see the caveat below |
 | `latency_samples()` | **8 / 42** | 34 processors report zero latency to PDC |
 
 Each row is a defect class rather than a style preference:
@@ -71,9 +71,23 @@ Each row is a defect class rather than a style preference:
   `"MIX"` knob for a loaded sidecar regardless of what it actually exposes.
 * **Sample rate** — the reverb shipped tuned for 44.1 kHz whatever the device
   ran at, losing 54% of its tail at 96 kHz, because `ReverbFactory` discarded
-  `_sample_rate` and `process` ignored `ctx`. `NeuralFilterProcessor` still has
-  `let sample_rate = 48000.0f32;` inside `process()`. These are two instances of
-  a class with 26 candidates.
+  `_sample_rate` and `process` ignored `ctx`. `NeuralFilterProcessor` had
+  `let sample_rate = 48000.0f32;` inside `process()`, which measured −0.15 dB
+  where it should have been −12.04 dB at 96 kHz.
+
+  **Corrected:** an earlier draft of this document read the `setup()` adoption
+  figure as a defect count and said "a class with 26 candidates". It is not.
+  Most of those 26 have no need of the rate — a gain stage, a summing node, a
+  stereo width control. Scanning for actual hardcoded rates finds five sites,
+  four of them legitimate: three inside `#[cfg(test)]` (`compressor.rs:171`,
+  `deck_stem_matrix.rs:317` and `:371`, the latter two calling `setup()`), and
+  a constructor default in `hypernetwork_eq.rs:26` whose `process` reads the
+  transport properly. The real remaining defect was **one**, now fixed.
+
+  That changes this item's justification rather than removing it: the value of
+  §2.3 is preventing a fourth instance, not cleaning up twenty-six. Its gate
+  therefore lands with an EMPTY allowlist, which is the strongest state a
+  ratchet can start from.
 * **Latency** — PDC machinery exists and is tested, but a processor that delays
   and reports 0 is silently uncompensated.
 
@@ -170,9 +184,11 @@ These change the shape of the work and are not mine to make.
 1. §2.1 addressed `SetParam` + a cross-talk test. Small, fixes a live audible
    bug, independent of every decision above.
 2. Decide §4.1 and §4.2.
-3. §2.3 rate contract + the scanning gate — highest defect count (26
-   candidates), and it retires a bug class this project has now shipped three
-   times (reverb, neural filter, sampler source rate).
+3. ~~§2.3 rate contract + the scanning gate~~ **DONE.** Not for the reason
+   given here first: the defect count was one, not twenty-six (see §1). The
+   gate landed anyway, with an empty allowlist, because it retires a bug class
+   this project has shipped three times — sampler source rate, reverb delay
+   constants, neural filter cutoff.
 4. §2.2 declared parameters + generic editor — the largest user-visible change,
    and it depends on §4.1 and §4.4.
 5. §2.4 latency contract.
@@ -180,4 +196,7 @@ These change the shape of the work and are not mine to make.
 ---
 
 *A finding in this document is a claim about a commit. Every measurement here is
-reproducible from the tree at the date above; re-run before relying on it.*
+reproducible from the tree at the date above; re-run before relying on it. One
+figure in the first draft — "26 candidates" for the rate class — did not survive
+that test and is corrected in §1; treat the remaining adoption counts as what
+they are, counts of hooks implemented, not counts of defects.*
