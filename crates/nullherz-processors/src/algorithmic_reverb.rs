@@ -43,6 +43,26 @@ fn delay_len(reference: usize, rate: f32, spread: usize) -> usize {
     scaled.clamp(1, MAX_DELAY_BUF - 1)
 }
 
+/// This processor's parameters, declared once.
+///
+/// REFERENCE USE of `ParamSpec`. The range lived in two places before: a
+/// `value.clamp(0.0, 0.98)` inside `set_parameter` and a parallel `mins`/`maxs`
+/// array inside `metadata()`. Two statements of one fact, with nothing
+/// connecting them — which is how 31 parameters across 10 processors came to
+/// declare ranges their clamps do not honour
+/// (`declared_params_match_behaviour_test`). Here `metadata()` publishes this
+/// table and `set_parameter` clamps against it, so there is no second place for
+/// a range to live and therefore none for it to drift to.
+///
+/// Ids are part of the saved-project format: a project references
+/// `(processor_type, param_id)`, so renumbering these reinterprets saved
+/// sessions. Append, never renumber.
+const PARAMS: &[nullherz_traits::ParamSpec] = &[
+    nullherz_traits::ParamSpec { id: 0, name: "ROOM SIZE", min: 0.0, max: 0.98, default: 0.8 },
+    nullherz_traits::ParamSpec { id: 1, name: "DAMP", min: 0.0, max: 0.95, default: 0.2 },
+    nullherz_traits::ParamSpec { id: 2, name: "MIX", min: 0.0, max: 1.0, default: 0.35 },
+];
+
 /// Zero-allocation Algorithmic Stereo Reverb Processor.
 pub struct AlgorithmicReverbProcessor {
     pub room_size: f32,
@@ -74,9 +94,10 @@ impl AlgorithmicReverbProcessor {
     pub fn with_sample_rate(sample_rate: f32) -> Self {
         Self {
             sample_rate: if sample_rate > 0.0 { sample_rate } else { nullherz_traits::DEFAULT_SAMPLE_RATE },
-            room_size: 0.8,
-            damp: 0.2,
-            wet_dry: 0.35,
+            // From the table, so a declared default is the default in fact.
+            room_size: PARAMS[0].default,
+            damp: PARAMS[1].default,
+            wet_dry: PARAMS[2].default,
             comb_buffers: [[[0.0; MAX_DELAY_BUF]; NUM_COMBS]; 2],
             comb_write_pos: [[0; NUM_COMBS]; 2],
             comb_filter_store: [[0.0; NUM_COMBS]; 2],
@@ -189,13 +210,15 @@ impl SnapshotProvider for AlgorithmicReverbProcessor {}
 
 impl AudioProcessor for AlgorithmicReverbProcessor {
     fn set_parameter(&mut self, param_id: u32, value: f32, _ramp_duration_samples: u32) {
-        if !value.is_finite() {
+        // Range from the table, not from a literal here. The match now only
+        // says WHERE the value goes; what is acceptable is declared once.
+        let Some(value) = nullherz_traits::ParamSpec::clamp_in(PARAMS, param_id, value) else {
             return;
-        }
+        };
         match param_id {
-            0 => self.room_size = value.clamp(0.0, 0.98),
-            1 => self.damp = value.clamp(0.0, 0.95),
-            2 => self.wet_dry = value.clamp(0.0, 1.0),
+            0 => self.room_size = value,
+            1 => self.damp = value,
+            2 => self.wet_dry = value,
             _ => {}
         }
     }
@@ -213,6 +236,12 @@ impl AudioProcessor for AlgorithmicReverbProcessor {
         if let nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam { param_id, value, ramp_duration_samples, .. }) = command {
             self.set_parameter(*param_id, *value, *ramp_duration_samples);
         }
+    }
+
+    fn metadata(&self) -> Option<nullherz_traits::ProcessorMetadata> {
+        // Same table `set_parameter` clamps against, so what a host draws and
+        // what the processor accepts cannot disagree.
+        Some(nullherz_traits::ProcessorMetadata::from_specs(0, PARAMS))
     }
 
     fn as_any(&self) -> &dyn std::any::Any { self }
