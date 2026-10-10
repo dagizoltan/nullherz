@@ -168,7 +168,7 @@ fn render_channel_fx_rack_item(app: &mut InspectorApp, ui: &mut Ui, ch_idx: usiz
             .fill(theme.bg_inset)
             .rounding(Rounding::same(theme.radius_sm))
             .inner_margin(Margin::same(2.0))
-            .stroke(Stroke::new(1.0, theme.border))
+            .stroke(Stroke::new(1.0_f32, theme.border))
             .show(ui, |ui| {
                 ui.set_width(STRIP_W - 12.0);
                 ui.vertical_centered(|ui| {
@@ -283,7 +283,7 @@ fn render_sampler_subchannel_fx_item(app: &mut InspectorApp, ui: &mut Ui, pad_id
             .fill(theme.bg_inset)
             .rounding(Rounding::same(theme.radius_sm))
             .inner_margin(Margin::same(2.0))
-            .stroke(Stroke::new(1.0, theme.border))
+            .stroke(Stroke::new(1.0_f32, theme.border))
             .show(ui, |ui| {
                 ui.set_width(STRIP_W - 12.0);
                 ui.vertical_centered(|ui| {
@@ -372,7 +372,7 @@ fn render_custom_subchannel_fx_item(app: &mut InspectorApp, ui: &mut Ui, parent_
             .fill(theme.bg_inset)
             .rounding(Rounding::same(theme.radius_sm))
             .inner_margin(Margin::same(2.0))
-            .stroke(Stroke::new(1.0, theme.border))
+            .stroke(Stroke::new(1.0_f32, theme.border))
             .show(ui, |ui| {
                 ui.set_width(STRIP_W - 12.0);
                 ui.vertical_centered(|ui| {
@@ -908,7 +908,7 @@ pub fn render_pad_subchannel_strips(app: &mut InspectorApp, ui: &mut Ui, parent_
                         .fill(theme.bg_surface)
                         .rounding(Rounding::same(theme.radius_md))
                         .inner_margin(Margin::same(4.0))
-                        .stroke(Stroke::new(1.0, subchannel_color.linear_multiply(0.7)))
+                        .stroke(Stroke::new(1.0_f32, subchannel_color.linear_multiply(0.7)))
                         .show(ui, |ui| {
                             ui.set_width(STRIP_W);
                             ui.vertical(|ui| {
@@ -989,7 +989,7 @@ pub fn render_pad_subchannel_strips(app: &mut InspectorApp, ui: &mut Ui, parent_
                     .fill(theme.bg_surface)
                     .rounding(Rounding::same(theme.radius_md))
                     .inner_margin(Margin::same(4.0))
-                    .stroke(Stroke::new(1.0, subchannel_color.linear_multiply(0.7)))
+                    .stroke(Stroke::new(1.0_f32, subchannel_color.linear_multiply(0.7)))
                     .show(ui, |ui| {
                         ui.set_width(STRIP_W);
                         ui.vertical(|ui| {
@@ -1413,7 +1413,7 @@ fn render_master_fx_rack_item(app: &mut InspectorApp, ui: &mut Ui, fx_idx: usize
             .fill(theme.bg_inset)
             .rounding(Rounding::same(theme.radius_sm))
             .inner_margin(Margin::same(2.0))
-            .stroke(Stroke::new(1.0, theme.border))
+            .stroke(Stroke::new(1.0_f32, theme.border))
             .show(ui, |ui| {
                 ui.set_width(STRIP_W - 12.0);
                 ui.vertical_centered(|ui| {
