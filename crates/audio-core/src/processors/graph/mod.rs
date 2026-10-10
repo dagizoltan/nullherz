@@ -232,6 +232,49 @@ impl ProcessorGraph {
                 self.modulation_matrix.remove_mapping(*macro_id, *target_id, *param_id);
             }
             Command::Mixer(nullherz_traits::MixerCommand::Bundle { .. }) => {}
+
+            // ADDRESSED, not broadcast.
+            //
+            // `SetParam` used to fall into the catch-all below, which hands the
+            // command to all 128 node slots and leaves it to each processor to
+            // notice it was not the addressee. 36 processors grew a filter for
+            // that; TEN of them never bound `target_id` at all, so they applied
+            // every `SetParam` aimed at anything:
+            //
+            //     reverb room_size: before=0.8 after=0.98
+            //       (command was addressed to node 7, param 0 = cutoff 20000 Hz)
+            //
+            // Parameter 0 is `room_size` (0..0.98) on the reverb, `cutoff`
+            // (20..20000 Hz) on the neural filter and `gain_db` (-24..24) on the
+            // hypernetwork EQ. All three load into the deck FX rack, so moving a
+            // filter cutoff slammed the reverb to its maximum room size and the
+            // EQ to +24 dB. `AGENTS.md` §3 warns about exactly this shape of
+            // match; the warning had been missed ten times, because a convention
+            // that must be re-applied in every processor is not a mechanism.
+            //
+            // `SetMacro` directly above has always resolved its target properly.
+            // This gives `SetParam` the same treatment, which makes the
+            // mis-addressing class unreachable instead of merely discouraged.
+            //
+            // `apply_command` rather than `set_parameter` on purpose: the 36
+            // existing arms are not uniform — six of them deliberately pass
+            // `0` for the ramp instead of `ramp_duration_samples` — so calling
+            // `set_parameter` here would quietly change their behaviour. Routing
+            // the command itself preserves each processor's own semantics and
+            // only removes the deliveries that were never meant for it.
+            //
+            // Out of range is dropped, matching `SetMacro` and
+            // `topology_coordinator::apply_mutation`: a `target_id` at or above
+            // `MAX_NODES` is a `NodeConventions` sentinel the conductor failed
+            // to translate, and broadcasting it would reintroduce the bug for
+            // precisely the ids that are most likely to be wrong.
+            Command::Mixer(MixerCommand::SetParam { target_id, .. }) => {
+                let node_idx = *target_id as usize;
+                if node_idx < crate::MAX_NODES {
+                    unsafe { (*self.nodes[node_idx].processor.get()).apply_command(command); }
+                }
+            }
+
             _ => { for node in self.nodes.iter() { unsafe { (*node.processor.get()).apply_command(command); } } }
         }
     }
