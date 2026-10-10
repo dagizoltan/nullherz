@@ -440,8 +440,10 @@ impl ProcessorFactory for MultiBandCompressorFactory {
 
 pub struct ReverbFactory;
 impl ProcessorFactory for ReverbFactory {
-    fn create_processor(&self, _node_idx: u32, _sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
-        Some(Box::new(AlgorithmicReverbProcessor::new()))
+    fn create_processor(&self, _node_idx: u32, sample_rate: f32) -> Option<Box<dyn AudioProcessor>> {
+        // The rate was discarded here, which is half of why the reverb was
+        // tuned for 44.1 kHz whatever the device ran at.
+        Some(Box::new(AlgorithmicReverbProcessor::with_sample_rate(sample_rate)))
     }
     fn name(&self) -> &'static str { "Reverb" }
     fn type_id(&self) -> ProcessorTypeId { ProcessorTypeId::REVERB }
