@@ -3,6 +3,21 @@ use nullherz_traits::{
     ProcessorCommand,
 };
 
+/// This processor's parameters, declared once.
+///
+/// `metadata()` publishes this table and `set_parameter` clamps against it, so
+/// the range a host draws is the range the processor enforces. Stating it twice
+/// is what let 31 parameters across 10 processors drift from their own clamps
+/// (`declared_params_match_behaviour_test`).
+///
+/// Ids are part of the saved-project format — a project references
+/// `(processor_type, param_id)`. Append, never renumber.
+const PARAMS: &[nullherz_traits::ParamSpec] = &[
+    nullherz_traits::ParamSpec { id: 0, name: "CUTOFF", min: 20.0, max: 20000.0, default: 1200.0 },
+    nullherz_traits::ParamSpec { id: 1, name: "RESONANCE", min: 0.1, max: 10.0, default: 2.0 },
+    nullherz_traits::ParamSpec { id: 2, name: "DRIVE", min: 0.0, max: 5.0, default: 0.5 },
+];
+
 /// Native Zero-Allocation Neural Dynamic Filter Processor
 pub struct NeuralFilterProcessor {
     pub node_id: u64,
@@ -17,9 +32,9 @@ impl NeuralFilterProcessor {
     pub fn new(node_id: u64) -> Self {
         Self {
             node_id,
-            cutoff: 1200.0,
-            resonance: 2.0,
-            neural_drive: 0.5,
+            cutoff: PARAMS[0].default,
+            resonance: PARAMS[1].default,
+            neural_drive: PARAMS[2].default,
             s1: [0.0; 16],
             s2: [0.0; 16],
         }
@@ -97,11 +112,17 @@ impl SnapshotProvider for NeuralFilterProcessor {}
 
 impl AudioProcessor for NeuralFilterProcessor {
     fn set_parameter(&mut self, param_id: u32, value: f32, _ramp_duration_samples: u32) {
-        let safe_val = if value.is_finite() { value } else { 1.0 };
+        // Range from PARAMS, which also REJECTS non-finite input. This used
+        // to substitute 1.0 for a NaN, which clamped the cutoff to 20 Hz —
+        // a garbage command silently moved the filter. Ignoring it leaves the
+        // parameter where the operator put it.
+        let Some(value) = nullherz_traits::ParamSpec::clamp_in(PARAMS, param_id, value) else {
+            return;
+        };
         match param_id {
-            0 => self.cutoff = safe_val.clamp(20.0, 20000.0),
-            1 => self.resonance = safe_val.clamp(0.1, 10.0),
-            2 => self.neural_drive = safe_val.clamp(0.0, 5.0),
+            0 => self.cutoff = value,
+            1 => self.resonance = value,
+            2 => self.neural_drive = value,
             _ => {}
         }
     }
@@ -119,6 +140,11 @@ impl AudioProcessor for NeuralFilterProcessor {
         if let nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam { param_id, value, ramp_duration_samples, .. }) = command {
             self.set_parameter(*param_id, *value, *ramp_duration_samples);
         }
+    }
+
+    fn metadata(&self) -> Option<nullherz_traits::ProcessorMetadata> {
+        // Same table `set_parameter` clamps against.
+        Some(nullherz_traits::ProcessorMetadata::from_specs(0, PARAMS))
     }
 
     fn as_any(&self) -> &dyn std::any::Any { self }

@@ -3,6 +3,21 @@ use nullherz_traits::{
     ProcessorCommand,
 };
 
+/// This processor's parameters, declared once.
+///
+/// `metadata()` publishes this table and `set_parameter` clamps against it, so
+/// the range a host draws is the range the processor enforces. Stating it twice
+/// is what let 31 parameters across 10 processors drift from their own clamps
+/// (`declared_params_match_behaviour_test`).
+///
+/// Ids are part of the saved-project format — a project references
+/// `(processor_type, param_id)`. Append, never renumber.
+const PARAMS: &[nullherz_traits::ParamSpec] = &[
+    nullherz_traits::ParamSpec { id: 0, name: "DRIVE", min: 0.0, max: 50.0, default: 1.5 },
+    nullherz_traits::ParamSpec { id: 1, name: "OUTPUT", min: 0.0, max: 10.0, default: 1.0 },
+    nullherz_traits::ParamSpec { id: 2, name: "MIX", min: 0.0, max: 1.0, default: 1.0 },
+];
+
 /// Native Zero-Allocation Neural Saturation & Analog Preamp Processor
 pub struct NeuralSaturatorProcessor {
     pub node_id: u64,
@@ -16,9 +31,9 @@ impl NeuralSaturatorProcessor {
     pub fn new(node_id: u64) -> Self {
         Self {
             node_id,
-            drive: 1.5,
-            output_gain: 1.0,
-            mix: 1.0,
+            drive: PARAMS[0].default,
+            output_gain: PARAMS[1].default,
+            mix: PARAMS[2].default,
             oversamplers: (0..16).map(|_| audio_dsp::util::Oversampler2x::new()).collect(),
         }
     }
@@ -75,11 +90,16 @@ impl SnapshotProvider for NeuralSaturatorProcessor {}
 
 impl AudioProcessor for NeuralSaturatorProcessor {
     fn set_parameter(&mut self, param_id: u32, value: f32, _ramp_duration_samples: u32) {
-        let safe_val = if value.is_finite() { value } else { 1.0 };
+        // Range from PARAMS, which also REJECTS non-finite input. This
+        // used to substitute 1.0 for a NaN, so a garbage command moved
+        // the parameter instead of being ignored.
+        let Some(value) = nullherz_traits::ParamSpec::clamp_in(PARAMS, param_id, value) else {
+            return;
+        };
         match param_id {
-            0 => self.drive = safe_val.clamp(0.0, 50.0),
-            1 => self.output_gain = safe_val.clamp(0.0, 10.0),
-            2 => self.mix = safe_val.clamp(0.0, 1.0),
+            0 => self.drive = value,
+            1 => self.output_gain = value,
+            2 => self.mix = value,
             _ => {}
         }
     }
@@ -104,6 +124,11 @@ impl AudioProcessor for NeuralSaturatorProcessor {
             }
             _ => {}
         }
+    }
+
+    fn metadata(&self) -> Option<nullherz_traits::ProcessorMetadata> {
+        // Same table `set_parameter` clamps against.
+        Some(nullherz_traits::ProcessorMetadata::from_specs(0, PARAMS))
     }
 
     fn as_any(&self) -> &dyn std::any::Any { self }

@@ -5,6 +5,28 @@ use nullherz_traits::{
 
 const MAX_MOD_BUF: usize = 4096;
 
+/// This processor's parameters, declared once.
+///
+/// `metadata()` publishes this table and `set_parameter` clamps against it, so
+/// the range a host draws is the range the processor enforces. Stating it twice
+/// is what let 31 parameters across 10 processors drift from their own clamps
+/// (`declared_params_match_behaviour_test`).
+///
+/// Ids are part of the saved-project format — a project references
+/// `(processor_type, param_id)`. Append, never renumber.
+///
+/// KNOWN GAP: parameter 0 is a discrete mode, not a continuous range. The bounds
+/// below are correct, but nothing here marks it as an enum, so a generic editor
+/// will draw a knob rather than three labelled positions. Expressing discrete
+/// parameters is a `ParamSpec` change, not something to fudge per processor.
+const PARAMS: &[nullherz_traits::ParamSpec] = &[
+    nullherz_traits::ParamSpec { id: 0, name: "MODE", min: 0.0, max: 2.0, default: 0.0 },
+    nullherz_traits::ParamSpec { id: 1, name: "RATE", min: 0.01, max: 20.0, default: 1.5 },
+    nullherz_traits::ParamSpec { id: 2, name: "DEPTH", min: 0.0, max: 1.0, default: 0.5 },
+    nullherz_traits::ParamSpec { id: 3, name: "FEEDBACK", min: 0.0, max: 0.95, default: 0.3 },
+    nullherz_traits::ParamSpec { id: 4, name: "MIX", min: 0.0, max: 1.0, default: 0.5 },
+];
+
 /// Zero-allocation Algorithmic Modulation FX Processor.
 pub struct AlgorithmicModulationProcessor {
     pub mode: u32,
@@ -22,11 +44,11 @@ pub struct AlgorithmicModulationProcessor {
 impl AlgorithmicModulationProcessor {
     pub fn new() -> Self {
         Self {
-            mode: 0,
-            rate_hz: 1.5,
-            depth: 0.5,
-            feedback: 0.3,
-            wet_dry: 0.5,
+            mode: PARAMS[0].default as u32,
+            rate_hz: PARAMS[1].default,
+            depth: PARAMS[2].default,
+            feedback: PARAMS[3].default,
+            wet_dry: PARAMS[4].default,
             lfo_phase: 0.0,
             delay_buffers: [[0.0; MAX_MOD_BUF]; 2],
             delay_write_pos: [0; 2],
@@ -123,15 +145,21 @@ impl SnapshotProvider for AlgorithmicModulationProcessor {}
 
 impl AudioProcessor for AlgorithmicModulationProcessor {
     fn set_parameter(&mut self, param_id: u32, value: f32, _ramp_duration_samples: u32) {
-        if !value.is_finite() {
+        // Range from PARAMS; non-finite is rejected there.
+        let Some(value) = nullherz_traits::ParamSpec::clamp_in(PARAMS, param_id, value) else {
             return;
-        }
+        };
         match param_id {
-            0 => self.mode = (value as u32).min(2),
-            1 => self.rate_hz = value.clamp(0.01, 20.0),
-            2 => self.depth = value.clamp(0.0, 1.0),
-            3 => self.feedback = value.clamp(0.0, 0.95),
-            4 => self.wet_dry = value.clamp(0.0, 1.0),
+            // MODE is discrete (0 chorus, 1 flanger, 2 phaser). The table
+            // bounds it 0..2, which is faithful but says nothing about it being
+            // an enum — a host reading the metadata draws a continuous knob
+            // where three labelled positions belong. `ParamSpec` has no way to
+            // express that yet; see the note on this table.
+            0 => self.mode = value as u32,
+            1 => self.rate_hz = value,
+            2 => self.depth = value,
+            3 => self.feedback = value,
+            4 => self.wet_dry = value,
             _ => {}
         }
     }
@@ -151,6 +179,11 @@ impl AudioProcessor for AlgorithmicModulationProcessor {
         if let nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam { param_id, value, ramp_duration_samples, .. }) = command {
             self.set_parameter(*param_id, *value, *ramp_duration_samples);
         }
+    }
+
+    fn metadata(&self) -> Option<nullherz_traits::ProcessorMetadata> {
+        // Same table `set_parameter` clamps against.
+        Some(nullherz_traits::ProcessorMetadata::from_specs(0, PARAMS))
     }
 
     fn as_any(&self) -> &dyn std::any::Any { self }
