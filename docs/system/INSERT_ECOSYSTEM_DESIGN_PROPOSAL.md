@@ -58,9 +58,9 @@ processor files:
 | hook | implemented | what the default means |
 | :--- | ---: | :--- |
 | `set_parameter` | 39 / 42 | — |
-| `metadata()` → declared params | **27 / 42** | 15 processors expose no parameters to any host |
+| `metadata()` → declared params | **27 / 42** | **12 processors expose 3–5 real parameters each that no host can discover** — the one figure here that survived checking |
 | `setup(AudioConfig)` | 16 / 42 | 26 processors do not implement it — see the caveat below |
-| `latency_samples()` | **8 / 42** | 34 processors report zero latency to PDC |
+| `latency_samples()` | 8 / 42 | 34 do not declare it, and **zero of them are wrong to** — see §1.1 |
 
 Each row is a defect class rather than a style preference:
 
@@ -88,8 +88,48 @@ Each row is a defect class rather than a style preference:
   §2.3 is preventing a fourth instance, not cleaning up twenty-six. Its gate
   therefore lands with an EMPTY allowlist, which is the strongest state a
   ratchet can start from.
-* **Latency** — PDC machinery exists and is tested, but a processor that delays
-  and reports 0 is silently uncompensated.
+* **Latency — WITHDRAWN, this was not a defect.** The claim was that a
+  processor which delays and reports 0 is silently uncompensated. Checked: of
+  the 34 that do not declare latency, only two have any delay state at all —
+  `modulation_fx` and `tape_saturator` — and both delays are **LFO-modulated**
+  (chorus/flanger, and tape wow/flutter). A modulated delay is the effect, not a
+  fixed group delay, and PDC neither can nor should compensate a time-varying
+  one. Reporting 0 is correct for both, and for the other 32, which genuinely
+  have no latency. There is no undeclared fixed latency in the tree.
+
+### 1.1 The same twelve processors skipped every contract
+
+Not a coincidence, and the most useful thing in this survey. The ten processors
+whose `SetParam` arm never bound `target_id` are **all** in the set that
+declares no parameter metadata:
+
+`algorithmic_reverb`, `hypernetwork_eq`, `modulation_fx`, `multiband_compressor`,
+`neural_filter`, `neural_nam`, `neural_saturator`, `neural_ssm`, `neural_tcn`,
+`tube_preamp` — plus `sample_drum_machine` and `synth_drum_machine`, which
+declare no metadata but did filter correctly.
+
+These are not twelve independent oversights. They are the processors written
+without reference to the insert contract at all, because nothing required
+reference to it: every hook is an optional default, so a processor can be
+registered, loaded into a rack and made audible while implementing none of them.
+That is the argument for this document in one sentence, and it is why the fix is
+a mechanism rather than twelve patches.
+
+### 1.2 What survived checking
+
+Three of the four contracts were justified by the adoption table above. Two did
+not survive measurement:
+
+| contract | claimed | actual |
+| :--- | :--- | :--- |
+| Addressing (§2.1) | 10 processors mis-apply `SetParam` | **confirmed, and fixed** — measured cross-talk, reverb room size 0.8 → 0.98 |
+| Declared parameters (§2.2) | 15 expose nothing | **confirmed** — 12 of them have 3–5 real parameters, ~44 invisible in total |
+| Rate (§2.3) | "a class with 26 candidates" | **one** defect, now fixed; the gate landed for prevention |
+| Latency (§2.4) | 34 under-report to PDC | **none** — withdrawn, see §1 |
+
+The lesson for whoever extends this document: the adoption counts are counts of
+hooks implemented. Reading one as a defect count was wrong twice out of three
+tries. Measure the defect before scheduling the contract.
 
 ---
 
@@ -130,12 +170,17 @@ a test that scans processor sources for rate literals (`44100`, `48000`,
 `/ sample_rate` against a constant) and fails when the file does not implement
 `setup`. The gate catches the *form*, not a list of known offenders.
 
-### 2.4 Latency is declared or asserted absent
+### 2.4 Latency — withdrawn
 
-`latency_samples()` is mandatory for insert-capable processors. A PDC test
-drives an impulse through each and asserts the measured group delay matches the
-declared value within a tolerance — so a wrong declaration fails rather than
-quietly mis-compensating.
+This section proposed making `latency_samples()` mandatory. Measurement
+(§1) found no processor with an undeclared fixed latency, so the contract would
+add ceremony without fixing anything.
+
+What is still worth having, and is much smaller: a PDC test over the **eight**
+processors that DO declare a latency, driving an impulse through each and
+asserting the measured group delay matches the declaration. That catches a wrong
+declaration, which is the remaining failure mode, and does not ask the other 34
+to assert a zero they already correctly report.
 
 ---
 
@@ -191,7 +236,8 @@ These change the shape of the work and are not mine to make.
    constants, neural filter cutoff.
 4. §2.2 declared parameters + generic editor — the largest user-visible change,
    and it depends on §4.1 and §4.4.
-5. §2.4 latency contract.
+5. ~~§2.4 latency contract~~ **WITHDRAWN** (§1). Optionally, the much smaller
+   version: verify the eight declarations that exist.
 
 ---
 
