@@ -1656,9 +1656,26 @@ impl Conductor {
 
         self.sync_sampler_metadata();
 
-        {
-            self.transfusion_manager.sample_registry.drain_garbage();
-        }
+        // Reclaim retired registry maps, but only a bounded amount per tick.
+        //
+        // This used to be an unbounded `drain_garbage()`. A copy-on-write
+        // registry retires one map per registration, and each retired map holds
+        // an `Arc` clone of every sample it contained, so the cost is the total
+        // of those references — not the number of maps. After a 10,000-sample
+        // library scan that is ~780k `Arc` decrements plus 10k deallocations in
+        // a single tick: 11.1 ms measured, against a 5.8 ms audio-block budget
+        // (`tick_budget_at_scale_test`), on the thread that feeds the RT
+        // command ring.
+        //
+        // The budget below is ~1/8th of that, chosen to leave the drain well
+        // inside one block even when every retired map is large, and the
+        // leftovers are reclaimed by the following ticks. Reclamation is
+        // housekeeping: being a few ticks late costs memory held slightly
+        // longer, where being 11 ms late costs every queued command.
+        const GARBAGE_ENTRIES_PER_TICK: usize = 8192;
+        self.transfusion_manager
+            .sample_registry
+            .drain_garbage_bounded(GARBAGE_ENTRIES_PER_TICK);
 
         self.drain_garbage();
     }
