@@ -573,42 +573,19 @@ impl CommandHandler {
                 }
 
                 {
-                    let mut lock = conductor.engine_coordinator.backend_manager.engine_handle.lock();
-                    if let Some(ref mut engine_arc) = *lock {
-                        let config = nullherz_traits::AudioConfig { sample_rate, block_size };
-                        match std::sync::Arc::get_mut(engine_arc) {
-                            Some(engine) => engine.set_config(config),
-                            // UNSOUND, and unavoidable without changing the
-                            // engine's API — documented rather than hidden.
-                            //
-                            // `get_mut` cannot succeed here. `EngineBuilder::build`
-                            // keeps a second clone of the engine as
-                            // `EngineHandle::controller` (`engine.clone() as
-                            // Arc<dyn RenderingController>`), which
-                            // `engine_coordinator` holds for the whole session,
-                            // so `strong_count` is 2 before any backend starts
-                            // and 3 while one runs. The `Some` arm above is dead
-                            // code; this cast is the only path that has ever
-                            // executed, which is worth knowing before trusting
-                            // the shape of this match.
-                            //
-                            // What the stop above buys: with the audio thread
-                            // joined, this `&mut` is the only one in existence,
-                            // so `graph.setup()` is no longer resizing node
-                            // buffers underneath a thread that is reading them.
-                            // That removes the data race. The aliasing itself —
-                            // `&mut` derived from a shared `Arc` — remains UB by
-                            // the letter and needs `set_config` to take `&self`
-                            // with interior mutability, the way
-                            // `set_pending_graph` next to it already does. That
-                            // is an engine API change, not a fix that belongs in
-                            // this command handler.
-                            None => {
-                                let ptr = std::sync::Arc::as_ptr(engine_arc)
-                                    as *mut dyn nullherz_traits::RenderingEngine;
-                                unsafe { (*ptr).set_config(config) };
-                            }
-                        }
+                    // No `Arc::get_mut`, no cast, no `unsafe`: `set_config`
+                    // takes `&self`.
+                    //
+                    // What used to be here was
+                    // `match Arc::get_mut(..) { Some(e) => .., None => <cast> }`,
+                    // which reads as a safe path with a rare unsafe fallback and
+                    // was the reverse — `EngineHandle::controller` holds a
+                    // second clone of the engine for the life of the session, so
+                    // `get_mut` never succeeded and the cast was the only path
+                    // that ever ran. See TECHNICAL_DEBT_AND_STUBS.md §1.1.
+                    let lock = conductor.engine_coordinator.backend_manager.engine_handle.lock();
+                    if let Some(ref engine) = *lock {
+                        engine.set_config(nullherz_traits::AudioConfig { sample_rate, block_size });
                     }
                 }
 

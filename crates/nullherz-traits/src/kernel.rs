@@ -25,7 +25,13 @@ pub trait RenderingEngine: Send + Sync {
     /// Process a block of audio. This is the primary entry point for audio processing.
     fn process_block(&mut self, inputs: &[&[f32]], outputs: &mut [&mut [f32]], num_samples: usize);
     /// Update the engine configuration (sample rate, block size).
-    fn set_config(&mut self, config: AudioConfig);
+    ///
+    /// `&self` deliberately. The engine is shared through an `Arc`, so a
+    /// `&mut self` here forces every caller to cast that `Arc` — which is UB,
+    /// and which is exactly what they all did. The caller must still guarantee
+    /// no audio thread is rendering, because reconfiguring resizes node
+    /// buffers; see `AudioEngine::set_config`.
+    fn set_config(&self, config: AudioConfig);
     /// Returns the target sample rate configured for the engine.
     fn target_sample_rate(&self) -> f32;
     /// Pulls all available snapshots from the signal graph for registration.

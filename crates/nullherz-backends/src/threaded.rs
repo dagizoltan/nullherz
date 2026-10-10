@@ -95,13 +95,13 @@ impl AudioBackend for ThreadedBackend {
             }
             {
                 if let Some(ref engine_arc) = *engine_handle.lock() {
-                    let engine_ptr = Arc::as_ptr(engine_arc) as *mut dyn RenderingEngine;
-                    unsafe {
-                        (*engine_ptr).set_config(nullherz_traits::AudioConfig {
-                            sample_rate: nullherz_traits::DEFAULT_SAMPLE_RATE,
-                            block_size: period_size as usize,
-                        });
-                    }
+                    // `set_config` takes `&self`, so this needs no cast
+                    // through the shared `Arc` — and so no `unsafe` block.
+                    // See TECHNICAL_DEBT_AND_STUBS.md §1.1.
+                    engine_arc.set_config(nullherz_traits::AudioConfig {
+                        sample_rate: nullherz_traits::DEFAULT_SAMPLE_RATE,
+                        block_size: period_size as usize,
+                    });
                 }
             }
 
@@ -224,7 +224,7 @@ mod tests {
                 out[..n].fill(self.marker);
             }
         }
-        fn set_config(&mut self, _config: nullherz_traits::AudioConfig) {}
+        fn set_config(&self, _config: nullherz_traits::AudioConfig) {}
         fn target_sample_rate(&self) -> f32 { self.rate }
         fn pull_all_snapshots(&self, _target: &mut Vec<(u64, Arc<Vec<f32>>)>) {}
         fn list_children(&self) -> Vec<&dyn nullherz_traits::AudioProcessor> { Vec::new() }
