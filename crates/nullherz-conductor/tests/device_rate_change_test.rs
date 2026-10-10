@@ -49,6 +49,31 @@ impl nullherz_backends::AudioBackend for CountingBackend {
     }
 }
 
+/// Backend that records what the engine's target rate was AT THE MOMENT it was
+/// stopped. That is what makes the ordering observable: if the device is torn
+/// down before `set_config` runs, the rate seen here is still the OLD one.
+struct OrderingBackend {
+    handle: Arc<parking_lot::Mutex<Option<Arc<dyn RenderingEngine>>>>,
+    rate_at_stop: Arc<parking_lot::Mutex<Option<f32>>>,
+}
+
+impl nullherz_backends::AudioBackend for OrderingBackend {
+    fn start(
+        &mut self,
+        _engine: Arc<parking_lot::Mutex<Option<Arc<dyn RenderingEngine>>>>,
+        _period_size: u64,
+    ) -> Result<(), String> {
+        Ok(())
+    }
+    fn stop(&mut self) {
+        let rate = self.handle.lock().as_ref().map(|e| e.target_sample_rate());
+        *self.rate_at_stop.lock() = rate;
+    }
+    fn enumerate_devices(&self) -> Vec<String> {
+        vec!["default".to_string()]
+    }
+}
+
 fn engine_rate(conductor: &Conductor) -> f32 {
     let lock = conductor.engine_coordinator.backend_manager.engine_handle.lock();
     lock.as_ref().map(|e| e.target_sample_rate()).unwrap_or(0.0)
@@ -162,5 +187,61 @@ fn test_the_session_follows_the_rate_the_device_negotiated() {
     assert_eq!(
         conductor.transfusion_manager.device_sample_rate(), 48_000,
         "captures would be stamped with a rate the device never ran at"
+    );
+}
+
+/// The device must be stopped BEFORE the engine is reconfigured.
+///
+/// `set_config` is not a field write: it calls `graph.setup()`, which re-runs
+/// setup on every node in the active graph and resizes the buffers the audio
+/// thread reads out of. Doing that under a live audio thread is a data race on
+/// node internals.
+///
+/// It is also the only place the engine gets mutated through
+/// `Arc::as_ptr(..) as *mut dyn RenderingEngine`, and that cast is not
+/// avoidable today: `EngineBuilder::build` keeps a second clone of the engine as
+/// `EngineHandle::controller`, so `Arc::get_mut` never succeeds and the safe arm
+/// of that match is dead code. Stopping first does not remove the aliasing, but
+/// it does remove the second thread, which is what turns it from a live race
+/// into a formal one.
+///
+/// This test pins the ordering rather than the aliasing: it asserts the backend
+/// was torn down while the engine still held its PREVIOUS rate.
+#[test]
+fn test_the_device_is_stopped_before_the_engine_is_reconfigured() {
+    let mut conductor = Conductor::with_library_path(":memory:");
+    conductor.setup_engine();
+
+    // Put the engine at a known rate first, with no backend attached.
+    conductor.apply_mixer_commands(vec![Command::Core(CoreCommand::ConfigureAudioEngine {
+        sample_rate: 44_100.0,
+        block_size: 256,
+    })]);
+    assert_eq!(engine_rate(&conductor), 44_100.0, "precondition");
+
+    let rate_at_stop = Arc::new(parking_lot::Mutex::new(None));
+    conductor.engine_coordinator.backend_manager.backend = Some(Box::new(OrderingBackend {
+        handle: conductor.engine_coordinator.backend_manager.engine_handle.clone(),
+        rate_at_stop: rate_at_stop.clone(),
+    }));
+    conductor.engine_coordinator.backend_manager.active_type =
+        Some(nullherz_traits::AudioBackendType::Mock);
+
+    conductor.apply_mixer_commands(vec![Command::Core(CoreCommand::ConfigureAudioEngine {
+        sample_rate: 48_000.0,
+        block_size: 256,
+    })]);
+
+    let seen = rate_at_stop.lock().take();
+    assert_eq!(
+        seen,
+        Some(44_100.0),
+        "the device was stopped when the engine already reported {seen:?}, so `set_config` — and \
+         the `graph.setup()` inside it — ran while the audio thread was still rendering out of \
+         the buffers it resizes"
+    );
+    assert_eq!(
+        engine_rate(&conductor), 48_000.0,
+        "the reconfigure did not land after the stop"
     );
 }

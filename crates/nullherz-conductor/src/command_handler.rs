@@ -541,59 +541,106 @@ impl CommandHandler {
                 true
             }
             CoreCommand::ConfigureAudioEngine { sample_rate, block_size } => {
+                conductor.period_size = block_size as u64;
+
+                // Stop the device BEFORE touching engine config.
+                //
+                // `set_config` is not a field write: it calls `graph.setup()`,
+                // which re-runs setup on every node in the ACTIVE graph and
+                // resizes the buffers the audio thread is reading out of. Doing
+                // that under a live audio thread is a data race on node
+                // internals, not merely a formal one.
+                //
+                // It was also mutating the engine through
+                // `Arc::as_ptr(..) as *mut dyn RenderingEngine` whenever
+                // `Arc::get_mut` failed — and `get_mut` fails EXACTLY when
+                // another holder exists, which is to say exactly when the audio
+                // thread is running and mutation is unsound. The fallback's
+                // precondition was the hazard.
+                //
+                // Stopping first fixes both: `BackendManager::stop` joins the
+                // audio thread and drops the backend, so the engine `Arc` drops
+                // back to the single reference held here, `get_mut` succeeds,
+                // and no second `&mut` can exist. The device then re-opens
+                // against the new config — which it has to anyway, since the
+                // rate and period are negotiated only at open.
+                let active = conductor.engine_coordinator.backend_manager.active_type;
+                if active.is_some() {
+                    conductor.stop_backend();
+                    // Devices need a moment to release; `switch_backend` takes
+                    // the same pause between stop and start.
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                }
+
                 {
                     let mut lock = conductor.engine_coordinator.backend_manager.engine_handle.lock();
                     if let Some(ref mut engine_arc) = *lock {
-                        if let Some(engine) = std::sync::Arc::get_mut(engine_arc) {
-                            engine.set_config(nullherz_traits::AudioConfig {
-                                sample_rate,
-                                block_size,
-                            });
-                        } else {
-                            let ptr = std::sync::Arc::as_ptr(engine_arc) as *mut dyn nullherz_traits::RenderingEngine;
-                            unsafe {
-                                (*ptr).set_config(nullherz_traits::AudioConfig {
-                                    sample_rate,
-                                    block_size,
-                                });
+                        let config = nullherz_traits::AudioConfig { sample_rate, block_size };
+                        match std::sync::Arc::get_mut(engine_arc) {
+                            Some(engine) => engine.set_config(config),
+                            // UNSOUND, and unavoidable without changing the
+                            // engine's API — documented rather than hidden.
+                            //
+                            // `get_mut` cannot succeed here. `EngineBuilder::build`
+                            // keeps a second clone of the engine as
+                            // `EngineHandle::controller` (`engine.clone() as
+                            // Arc<dyn RenderingController>`), which
+                            // `engine_coordinator` holds for the whole session,
+                            // so `strong_count` is 2 before any backend starts
+                            // and 3 while one runs. The `Some` arm above is dead
+                            // code; this cast is the only path that has ever
+                            // executed, which is worth knowing before trusting
+                            // the shape of this match.
+                            //
+                            // What the stop above buys: with the audio thread
+                            // joined, this `&mut` is the only one in existence,
+                            // so `graph.setup()` is no longer resizing node
+                            // buffers underneath a thread that is reading them.
+                            // That removes the data race. The aliasing itself —
+                            // `&mut` derived from a shared `Arc` — remains UB by
+                            // the letter and needs `set_config` to take `&self`
+                            // with interior mutability, the way
+                            // `set_pending_graph` next to it already does. That
+                            // is an engine API change, not a fix that belongs in
+                            // this command handler.
+                            None => {
+                                let ptr = std::sync::Arc::as_ptr(engine_arc)
+                                    as *mut dyn nullherz_traits::RenderingEngine;
+                                unsafe { (*ptr).set_config(config) };
                             }
                         }
                     }
                 }
-                conductor.period_size = block_size as u64;
 
-                // Make the DEVICE re-negotiate, or this command is a lie.
+                // Re-open the device, or this command is a lie.
                 //
-                // `set_config` above only changes what the engine BELIEVES and
-                // what the next `start()` will ask the device for. The running
-                // device keeps clocking at the rate it opened with, because
-                // nothing here used to reopen it: `switch_backend`'s only other
-                // caller is the output-device selector, and `start_backend` runs
-                // once at startup. So picking 48 kHz on a device running at
-                // 44.1 kHz left the engine rendering for 48 kHz into hardware
-                // consuming 44,100 frames a second, and EVERY track played at
-                // 44100/48000 = 0.919x — about 1.5 semitones flat. Lowering the
-                // rate pitched everything up by the same ratio.
+                // `set_config` only changes what the engine BELIEVES and what
+                // the next `start()` will ask the device for. Rate, period and
+                // format are negotiated at open, so a device left running keeps
+                // clocking at whatever it opened with: picking 48 kHz on a
+                // device running at 44.1 kHz left the engine rendering for
+                // 48 kHz into hardware consuming 44,100 frames a second, and
+                // every track played at 44100/48000 = 0.919x — about 1.5
+                // semitones flat, the opposite way when lowering the rate.
                 //
-                // `sync_session_rate()` could not catch it either: it reads the
+                // `sync_session_rate()` could not catch it: it reads the
                 // ENGINE's target rate, so it propagated the new belief rather
                 // than detecting the disagreement with the hardware.
                 //
-                // This blocks the command path for the teardown plus
-                // `switch_backend`'s settle delay, which AGENTS.md §1 otherwise
-                // forbids. It is allowed here for the same reason the
-                // output-device selector does it inline: reconfiguring the
+                // On AGENTS.md §1: this blocks the command path for a teardown,
+                // a settle pause and an open. Allowed here for the same reason
+                // the output-device selector does it inline — reconfiguring the
                 // device inherently stops the audio thread, the backend is owned
                 // by this conductor so no other thread can restart it, and it is
                 // a one-shot user action rather than recurring work.
-                if let Some(active) = conductor.engine_coordinator.backend_manager.active_type {
-                    if let Err(e) = conductor.switch_backend(active) {
-                        // `switch_backend` stops the old device before starting
-                        // the new one, so a failure here leaves NO device
-                        // running, not the previous one. Say that, because the
-                        // two have opposite symptoms: silence, not wrong pitch.
+                if let Some(active) = active {
+                    if let Err(e) = conductor.start_backend(active) {
+                        // The old device was stopped above, so a failure here
+                        // leaves NO device running rather than the previous one.
+                        // Say that: the two have opposite symptoms — silence,
+                        // not wrong pitch.
                         eprintln!(
-                            "CommandHandler: ConfigureAudioEngine could not reopen the {:?} backend at {} Hz ({}). \
+                            "CommandHandler: ConfigureAudioEngine could not re-open the {:?} backend at {} Hz ({}). \
                              The previous device was already stopped, so there is no audio output until a \
                              backend is started again.",
                             active, sample_rate, e
