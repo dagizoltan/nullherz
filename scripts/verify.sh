@@ -49,6 +49,16 @@ RUSTFLAGS="-D warnings" run_step "cargo check" cargo check --workspace --all-tar
 bold "==> cargo test --workspace"
 # Tests run on the Mock backend; no audio hardware required.
 run_step "cargo test (debug)" cargo test --workspace --quiet 2>&1 | awk '
+    # Pass the reason through. Without this the summary below is the ONLY
+    # thing that reaches the log, and it can flatly contradict the step: a
+    # cargo invocation that fails without a failing TEST — a test binary that
+    # cannot start, a doc test that will not compile, two overlapping runs
+    # fighting over the target lock — prints no `test result:` line for the
+    # failure, so the summary reads "N passed, 0 failed" over the top of it.
+    # `set -o pipefail` still fails the step correctly; what was missing was
+    # any way to find out WHY from the log, which sent one reader hunting for
+    # an exit code in a different file.
+    /panicked at|^error|FAILED|TIMED OUT/ { print "    " $0 }
     /^test result:/ { passed += $4; failed += $6 }
     END {
         printf "    %d passed, %d failed\n", passed, failed
@@ -63,6 +73,16 @@ run_step "cargo test (debug)" cargo test --workspace --quiet 2>&1 | awk '
 # builds release, so the marginal cost here is the test targets.
 bold "==> cargo test --workspace --release (timing budgets)"
 run_step "cargo test (release)" cargo test --workspace --release --quiet 2>&1 | awk '
+    # Pass the reason through. Without this the summary below is the ONLY
+    # thing that reaches the log, and it can flatly contradict the step: a
+    # cargo invocation that fails without a failing TEST — a test binary that
+    # cannot start, a doc test that will not compile, two overlapping runs
+    # fighting over the target lock — prints no `test result:` line for the
+    # failure, so the summary reads "N passed, 0 failed" over the top of it.
+    # `set -o pipefail` still fails the step correctly; what was missing was
+    # any way to find out WHY from the log, which sent one reader hunting for
+    # an exit code in a different file.
+    /panicked at|^error|FAILED|TIMED OUT/ { print "    " $0 }
     /^test result:/ { passed += $4; failed += $6 }
     END {
         printf "    %d passed, %d failed\n", passed, failed
