@@ -3,6 +3,22 @@ use nullherz_traits::{
     ProcessorCommand,
 };
 
+/// This processor's parameters, declared once.
+///
+/// `metadata()` publishes this table and `set_parameter` clamps against it, so
+/// the range a host draws is the range the processor enforces. Stating it twice
+/// is what let 31 parameters across 10 processors drift from their own clamps
+/// (`declared_params_match_behaviour_test`).
+///
+/// Ids are part of the saved-project format — a project references
+/// `(processor_type, param_id)`. Append, never renumber.
+const PARAMS: &[nullherz_traits::ParamSpec] = &[
+    nullherz_traits::ParamSpec { id: 0, name: "THRESHOLD", min: -60.0, max: 0.0, default: -12.0 },
+    nullherz_traits::ParamSpec { id: 1, name: "RATIO", min: 1.0, max: 20.0, default: 4.0 },
+    nullherz_traits::ParamSpec { id: 2, name: "XOVER LOW", min: 40.0, max: 1000.0, default: 250.0 },
+    nullherz_traits::ParamSpec { id: 3, name: "XOVER HIGH", min: 1000.0, max: 15000.0, default: 4000.0 },
+];
+
 /// Zero-allocation 3-Band State-Space Model (SSM) Dynamic Compressor Processor.
 pub struct MultiBandCompressorProcessor {
     pub threshold_db: f32,
@@ -17,10 +33,10 @@ pub struct MultiBandCompressorProcessor {
 impl MultiBandCompressorProcessor {
     pub fn new() -> Self {
         Self {
-            threshold_db: -12.0,
-            ratio: 4.0,
-            crossover_low_hz: 250.0,
-            crossover_high_hz: 4000.0,
+            threshold_db: PARAMS[0].default,
+            ratio: PARAMS[1].default,
+            crossover_low_hz: PARAMS[2].default,
+            crossover_high_hz: PARAMS[3].default,
             svf_low: [[0.0; 3]; 2],
             svf_high: [[0.0; 3]; 2],
             env_states: [[0.0; 3]; 2],
@@ -117,14 +133,15 @@ impl SnapshotProvider for MultiBandCompressorProcessor {}
 
 impl AudioProcessor for MultiBandCompressorProcessor {
     fn set_parameter(&mut self, param_id: u32, value: f32, _ramp_duration_samples: u32) {
-        if !value.is_finite() {
+        // Range from PARAMS; non-finite is rejected there.
+        let Some(value) = nullherz_traits::ParamSpec::clamp_in(PARAMS, param_id, value) else {
             return;
-        }
+        };
         match param_id {
-            0 => self.threshold_db = value.clamp(-60.0, 0.0),
-            1 => self.ratio = value.clamp(1.0, 20.0),
-            2 => self.crossover_low_hz = value.clamp(40.0, 1000.0),
-            3 => self.crossover_high_hz = value.clamp(1000.0, 15000.0),
+            0 => self.threshold_db = value,
+            1 => self.ratio = value,
+            2 => self.crossover_low_hz = value,
+            3 => self.crossover_high_hz = value,
             _ => {}
         }
     }
@@ -143,6 +160,11 @@ impl AudioProcessor for MultiBandCompressorProcessor {
         if let nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam { param_id, value, ramp_duration_samples, .. }) = command {
             self.set_parameter(*param_id, *value, *ramp_duration_samples);
         }
+    }
+
+    fn metadata(&self) -> Option<nullherz_traits::ProcessorMetadata> {
+        // Same table `set_parameter` clamps against.
+        Some(nullherz_traits::ProcessorMetadata::from_specs(0, PARAMS))
     }
 
     fn as_any(&self) -> &dyn std::any::Any { self }

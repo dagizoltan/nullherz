@@ -3,6 +3,21 @@ use nullherz_traits::{
     ProcessorCommand,
 };
 
+/// This processor's parameters, declared once.
+///
+/// `metadata()` publishes this table and `set_parameter` clamps against it, so
+/// the range a host draws is the range the processor enforces. Stating it twice
+/// is what let 31 parameters across 10 processors drift from their own clamps
+/// (`declared_params_match_behaviour_test`).
+///
+/// Ids are part of the saved-project format — a project references
+/// `(processor_type, param_id)`. Append, never renumber.
+const PARAMS: &[nullherz_traits::ParamSpec] = &[
+    nullherz_traits::ParamSpec { id: 0, name: "DRIVE", min: 0.1, max: 10.0, default: 1.0 },
+    nullherz_traits::ParamSpec { id: 1, name: "BIAS", min: -0.5, max: 0.5, default: 0.0 },
+    nullherz_traits::ParamSpec { id: 2, name: "OUTPUT", min: 0.0, max: 4.0, default: 1.0 },
+];
+
 /// Zero-allocation Tube Preamp & Transformer Saturation Processor.
 pub struct TubePreampProcessor {
     pub drive: f32,
@@ -15,9 +30,9 @@ pub struct TubePreampProcessor {
 impl TubePreampProcessor {
     pub fn new() -> Self {
         Self {
-            drive: 1.0,
-            bias: 0.0,
-            output_gain: 1.0,
+            drive: PARAMS[0].default,
+            bias: PARAMS[1].default,
+            output_gain: PARAMS[2].default,
             dc_block_state: [0.0; 2],
             transformer_state: [0.0; 2],
         }
@@ -87,13 +102,14 @@ impl SnapshotProvider for TubePreampProcessor {}
 
 impl AudioProcessor for TubePreampProcessor {
     fn set_parameter(&mut self, param_id: u32, value: f32, _ramp_duration_samples: u32) {
-        if !value.is_finite() {
+        // Range from PARAMS; non-finite is rejected there.
+        let Some(value) = nullherz_traits::ParamSpec::clamp_in(PARAMS, param_id, value) else {
             return;
-        }
+        };
         match param_id {
-            0 => self.drive = value.clamp(0.1, 10.0),
-            1 => self.bias = value.clamp(-0.5, 0.5),
-            2 => self.output_gain = value.clamp(0.0, 4.0),
+            0 => self.drive = value,
+            1 => self.bias = value,
+            2 => self.output_gain = value,
             _ => {}
         }
     }
@@ -111,6 +127,11 @@ impl AudioProcessor for TubePreampProcessor {
         if let nullherz_traits::Command::Mixer(nullherz_traits::MixerCommand::SetParam { param_id, value, ramp_duration_samples, .. }) = command {
             self.set_parameter(*param_id, *value, *ramp_duration_samples);
         }
+    }
+
+    fn metadata(&self) -> Option<nullherz_traits::ProcessorMetadata> {
+        // Same table `set_parameter` clamps against.
+        Some(nullherz_traits::ProcessorMetadata::from_specs(0, PARAMS))
     }
 
     fn as_any(&self) -> &dyn std::any::Any { self }
