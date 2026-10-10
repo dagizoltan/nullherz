@@ -193,6 +193,42 @@ impl nullherz_traits::SampleRegistry for SampleRegistry {
     /// under continuous read pressure defers the memory too — if that ever
     /// shows up in residency numbers, the answer is `arc-swap` or
     /// `crossbeam-epoch` rather than a cleverer version of this.
+    fn drain_garbage_bounded(&self, max_entries: usize) -> usize {
+        // Same ordering argument as `drain_garbage` below, shard by shard:
+        // take that shard's garbage lock first, THEN check readers. Freeing a
+        // subset is sound because everything in the list when we checked was
+        // retired before we took the lock; what we leave behind simply waits
+        // for the next call.
+        //
+        // The budget counts sample REFERENCES, not maps, because that is what
+        // the work is proportional to — a retired map holds an `Arc` clone of
+        // every sample it contained, and under copy-on-write the map retired by
+        // the Nth registration holds N-1 of them.
+        let mut freed = 0usize;
+        for shard in &self.shards {
+            if freed >= max_entries {
+                break;
+            }
+            let mut g = shard.garbage.lock();
+            if self.readers.load(Ordering::SeqCst) > 0 {
+                return freed;
+            }
+            while freed < max_entries {
+                match g.pop() {
+                    Some(ptr) => {
+                        // SAFETY: retired before this lock was taken, and no
+                        // reader is active (checked above).
+                        let map = unsafe { Box::from_raw(ptr) };
+                        freed += map.len().max(1);
+                        drop(map);
+                    }
+                    None => break,
+                }
+            }
+        }
+        freed
+    }
+
     fn drain_garbage(&self) {
         // Per shard, in the same order: take THAT shard's garbage lock, then
         // check readers. Holding shard S's lock is what stops a writer pushing

@@ -157,3 +157,54 @@ fn test_reading_residency_does_not_block_reclamation() {
          holding the reader count up, which is what the walk did"
     );
 }
+
+/// `drain_garbage_bounded` must actually bound, and must not lose garbage.
+///
+/// The conductor calls it on every `tick()`. An unbounded drain there cost
+/// 11.1 ms after a 10k-sample scan, against a 5.8 ms audio-block budget — a
+/// retired map holds an `Arc` clone of every sample it contained, so the work
+/// is the total of those references, not the number of maps.
+#[test]
+fn test_bounded_drain_frees_some_but_not_everything() {
+    let reg = registry();
+    // 400 registrations into a growing map: the Nth retires a map holding N-1
+    // references, so total garbage is ~sum(1..400) spread over the shards.
+    for id in 0..400u64 {
+        reg.register_with_metadata(id, buffer(8), meta());
+    }
+    let before = reg.garbage_len();
+    assert!(before > 0, "precondition: registration retires maps");
+
+    let freed = reg.drain_garbage_bounded(16);
+    assert!(freed > 0, "a bounded drain with a positive budget freed nothing");
+    assert!(
+        reg.garbage_len() > 0,
+        "a 16-entry budget drained all {before} retired maps; it is not bounding anything"
+    );
+
+    // Repeated calls make progress and eventually finish.
+    for _ in 0..10_000 {
+        if reg.garbage_len() == 0 { break; }
+        reg.drain_garbage_bounded(64);
+    }
+    assert_eq!(
+        reg.garbage_len(), 0,
+        "repeated bounded drains never finished; garbage would grow without bound"
+    );
+    // And the samples themselves are untouched — only the retired MAPS are freed.
+    assert_eq!(reg.residency().count, 400);
+    assert_agrees(&reg, "a full sequence of bounded drains");
+}
+
+/// A zero budget must be a no-op rather than a full drain, or a caller that
+/// means "not now" gets the unbounded cost it was avoiding.
+#[test]
+fn test_a_zero_budget_drains_nothing() {
+    let reg = registry();
+    for id in 0..64u64 {
+        reg.register_with_metadata(id, buffer(8), meta());
+    }
+    let before = reg.garbage_len();
+    assert_eq!(reg.drain_garbage_bounded(0), 0);
+    assert_eq!(reg.garbage_len(), before, "a zero budget freed maps anyway");
+}

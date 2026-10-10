@@ -154,7 +154,25 @@ pub trait SampleRegistry: Send + Sync {
     fn residency(&self) -> Residency;
     fn register(&self, id: u64, buffer: SampleBuffer);
     fn register_with_metadata(&self, id: u64, buffer: SampleBuffer, metadata: Arc<SampleMetadata>);
+    /// Reclaim every retired map. Unbounded: cost is the total number of sample
+    /// references the retired maps hold.
     fn drain_garbage(&self);
+
+    /// Reclaim retired maps until `max_entries` sample references have been
+    /// freed, and report how many were. Returns 0 when there is nothing to do.
+    ///
+    /// Not defaulted, deliberately — a default forwarding to `drain_garbage`
+    /// would silently ignore the budget, and the budget is the entire point.
+    ///
+    /// Exists because the conductor drains on every `tick()`, the thread that
+    /// feeds the RT command ring, and a copy-on-write registry retires one map
+    /// per registration. After a 10,000-sample library scan that is ~780k
+    /// `Arc` decrements plus 10k deallocations in one go: measured at 11.1 ms
+    /// against a 5.8 ms audio-block budget by
+    /// `tick_budget_at_scale_test`. Reclamation is housekeeping, so spreading
+    /// it over successive ticks is correct; blocking the command path on it is
+    /// not.
+    fn drain_garbage_bounded(&self, max_entries: usize) -> usize;
     fn list_ids(&self) -> Vec<u64>;
 
     /// Drop the registry's reference to a sample, returning it to the caller.
