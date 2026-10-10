@@ -524,8 +524,9 @@ impl AlsaBackend {
                 };
 
                 if let Some(ref engine_arc) = engine_arc_opt {
-                    let engine_ptr = Arc::as_ptr(engine_arc) as *mut dyn RenderingEngine;
-                    (*engine_ptr).set_config(nullherz_traits::AudioConfig {
+                    // `set_config` takes `&self`, so this needs no cast through
+                    // the shared `Arc` — see TECHNICAL_DEBT_AND_STUBS.md §1.1.
+                    engine_arc.set_config(nullherz_traits::AudioConfig {
                         sample_rate: cfg.rate as f32,
                         block_size: cfg.period_size as usize,
                     });
